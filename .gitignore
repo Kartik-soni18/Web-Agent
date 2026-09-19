@@ -1,0 +1,6 @@
+__pycache__
+.venv
+output/*
+.python-version
+PLAN.MD
+test_*
