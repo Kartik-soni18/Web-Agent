@@ -1,6 +1,9 @@
-from .observations import BrowserObservation
+from dataclasses import dataclass, field
+
 from .execution import ExecutionResult
-from dataclasses import dataclass,field
+from .observations import BrowserObservation
+
+
 @dataclass
 class AgentState:
     task: str

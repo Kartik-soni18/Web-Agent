@@ -38,7 +38,8 @@ async def browser_runtime(start_url: str | None = START_URL) -> AsyncIterator[Ru
         context = None
         try:
             browser = await playwright.chromium.launch(
-                headless=True,
+                headless=False,
+                slow_mo=250,
             )
             context = await browser.new_context()
             page = await context.new_page()
