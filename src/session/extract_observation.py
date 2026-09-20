@@ -3,7 +3,7 @@ from typing import Any
 
 from playwright.async_api import Page
 
-from ..clean_tree.clean_accesibiilty_tree import prune_accessibility_tree
+from ..clean_tree.accessibility_tree import prune_accessibility_tree
 from ..models.observations import BrowserObservation
 from .runtime import browser_runtime
 

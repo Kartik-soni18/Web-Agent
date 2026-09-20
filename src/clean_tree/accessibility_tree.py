@@ -3,14 +3,35 @@
 from typing import Any
 
 ACTIONABLE_ROLES = {
-    "button", "checkbox", "combobox", "link", "menuitem", "menuitemcheckbox",
-    "menuitemradio", "option", "radio", "searchbox", "slider", "spinbutton",
-    "switch", "tab", "textbox", "treeitem",
+    "button",
+    "checkbox",
+    "combobox",
+    "link",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "searchbox",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "textbox",
+    "treeitem",
 }
 SKIPPED_ROLES = {"InlineTextBox", "LineBreak", "ListMarker", "none", "presentation"}
 STATE_NAMES = {
-    "checked", "disabled", "expanded", "focused", "hasPopup", "level", "pressed",
-    "required", "selected", "url",
+    "checked",
+    "disabled",
+    "expanded",
+    "focused",
+    "hasPopup",
+    "level",
+    "pressed",
+    "required",
+    "selected",
+    "url",
 }
 
 
@@ -34,7 +55,9 @@ def prune_accessibility_tree(tree: dict[str, Any]) -> dict[str, list[dict[str, A
     nodes = {node["nodeId"]: node for node in tree.get("nodes", [])}
     references = 0
 
-    def visit(node_id: str, parent_name: str, ancestors: frozenset[str]) -> list[dict[str, Any]]:
+    def visit(
+        node_id: str, parent_name: str, ancestors: frozenset[str]
+    ) -> list[dict[str, Any]]:
         nonlocal references
         if node_id in ancestors or (node := nodes.get(node_id)) is None:
             return []
@@ -69,4 +92,6 @@ def prune_accessibility_tree(tree: dict[str, Any]) -> dict[str, list[dict[str, A
         return [observation]
 
     roots = [node_id for node_id, node in nodes.items() if "parentId" not in node]
-    return {"nodes": [child for root in roots for child in visit(root, "", frozenset())]}
+    return {
+        "nodes": [child for root in roots for child in visit(root, "", frozenset())]
+    }

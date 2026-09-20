@@ -127,10 +127,12 @@ class OpenRouterActionProvider:
             raise ValueError("an OpenRouter model is required")
         self.model = model
         self.client = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
+        self.last_usage: dict[str, int | float | str] = {}
 
     async def next_action(
         self, context: dict[str, object]
     ) -> ExecuteBrowserCode | AskUser | Finish:
+        self.last_usage = {}
         completion = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -140,7 +142,17 @@ class OpenRouterActionProvider:
             tools=TOOLS,
             tool_choice="required",
             parallel_tool_calls=False,
+            extra_body={"usage": {"include": True}},
         )
+        if completion.usage is not None:
+            usage = completion.usage.model_dump()
+            self.last_usage = {
+                "input_tokens": int(usage.get("prompt_tokens") or 0),
+                "output_tokens": int(usage.get("completion_tokens") or 0),
+                "total_tokens": int(usage.get("total_tokens") or 0),
+                "cost_usd": float(usage.get("cost") or 0.0),
+                "response_model": completion.model,
+            }
         if not completion.choices:
             raise ModelActionError("model returned no choices")
 

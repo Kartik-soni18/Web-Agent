@@ -10,7 +10,7 @@ from src.openrouter_adapter import OpenRouterActionProvider
 
 MODEL = "deepseek/deepseek-v4.1-flash"
 TASK = (
-    "Search DuckDuckGo for the official Python asyncio documentation, open the official Python documentation result, and return the page title, URL, and first three section headings"
+    "On Google Flights, find the cheapest Jaipur-to-Bengaluru round trip for any five-day stay next month. Compare it with the shortest itinerary and report dates, airline, stops, duration, price, currency, and source URL—without booking."
 )
 
 
