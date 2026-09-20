@@ -4,3 +4,4 @@ output/*
 .python-version
 PLAN.MD
 test_*
+.env
