@@ -1,28 +1,46 @@
 # Web Agent
 
-A CodeAct-style browser agent with a persistent Playwright worker. The parent
-controller sends one model-selected action at a time while the child process keeps
-the same browser page and Python namespace alive.
+Web Agent is an experimental AI browser agent for automating everyday web-based
+tasks. It asks an OpenRouter model to write async Playwright Python, executes that
+code in a child worker, and keeps the same browser and Python namespace alive across
+multiple steps.
 
-Run it with:
+The project currently:
 
-```bash
-uv run python main.py \
-  "Find information on the web" \
-  --model provider/model-name \
-  --allow-unsafe-exec
+- launches a visible Chromium browser with a small delay between Playwright actions;
+- observes the current URL, title, and a pruned accessibility tree;
+- supports three model actions: execute browser code, ask the user, and finish;
+- rebuilds a bounded context from the current task, memory, execution result, and page;
+- keeps the OpenRouter API key out of the worker environment;
+- uses the hardcoded model and example task configured in `main.py`.
+
+## Improvements
+
+- Run generated code inside a real OS or container sandbox.
+- Add execution timeouts, step limits, failure limits, and output-size limits.
+- Improve observations with screenshots, stronger DOM data, and multi-tab tracking.
+- Make the task and model configurable from the command line again.
+- Record token usage, cost, latency, steps, and validated task success.
+- Add broader automated and browser integration tests.
+
+## Setup and run
+
+Create a `.env` file containing:
+
+```env
+OPENROUTER_API_KEY=your_key_here
 ```
 
-Set `OPENROUTER_API_KEY` in the environment or `.env`. You can set
-`OPENROUTER_MODEL` instead of passing `--model`.
-
-`--allow-unsafe-exec` is required because model-generated Python runs as your OS
-user. The worker has a temporary working directory and sanitized environment, but it
-is not a security sandbox and can still access files your user can access.
-
-The controller and adapter can be checked without using OpenRouter:
+Install the project and Chromium, then run the agent:
 
 ```bash
-uv run python -m src.controller
-uv run python -m src.openrouter_adapter
+uv sync
+uv run playwright install chromium
+uv run python main.py --allow-unsafe-exec
 ```
+
+> [!WARNING]
+> The model generates and executes arbitrary Python code. It may execute unwanted
+> code, access or modify files available to your OS user, or perform unintended web
+> actions. The child worker is not a security sandbox. Run this project only in an
+> environment where that risk is acceptable.
