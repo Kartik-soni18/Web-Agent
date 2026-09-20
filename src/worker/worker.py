@@ -6,9 +6,9 @@ from dataclasses import asdict
 from io import StringIO
 from typing import TextIO
 
-from .executor.exec import AsyncExecutor
-from .session.extract_observation import browser_observation
-from .session.runtime import START_URL, Runtime, browser_runtime
+from ..executor.exec import AsyncExecutor
+from ..session.extract_observation import browser_observation
+from ..session.runtime import START_URL, Runtime, browser_runtime
 
 
 class BrowserWorker:
@@ -133,9 +133,4 @@ async def serve(
     finally:
         await worker.close()
 
-async def main() -> None:
-    await serve()
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
