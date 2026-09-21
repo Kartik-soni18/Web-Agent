@@ -5,14 +5,13 @@ from time import perf_counter
 from typing import TypeVar
 
 from ..metrics import RunMetrics, RunTrace
-from ..models.actions import AskUser, ExecuteBrowserCode, Finish
+from ..models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 from ..models.execution import ExecutionResult
 from ..models.observations import BrowserObservation
 from ..models.state import AgentState
 from ..worker.client import WorkerClient
 from .api import ACTION_NAMES, Action, ActionProvider, AskUserCallback
 from .context import build_model_context
-from .evidence import apply_state_update, store_execution, store_observation
 
 
 Response = TypeVar("Response")
@@ -36,6 +35,11 @@ def _record_exception(trace: RunTrace, error: BaseException, error_type: str) ->
         "cancelled" if isinstance(error, asyncio.CancelledError) else error_type
     )
     trace.error_message = f"{type(error).__name__}: {error}"
+
+
+def _apply_memory(memory: Memory, state: AgentState) -> None:
+    state.facts = list(dict.fromkeys([*state.facts, *memory.facts]))
+    state.remaining_requirements = list(memory.remaining)
 
 
 async def prompt_user(question: str) -> str:
@@ -78,7 +82,7 @@ class Controller:
             observation = _response_dataclass(
                 started, "observation", BrowserObservation
             )
-            store_observation(state, observation, step=0)
+            state.observation = observation
             result = await self._run_steps(state, worker, metrics)
             final_answer = result.answer
             final_success = result.success
@@ -115,7 +119,7 @@ class Controller:
             state.step += 1
             trace = RunTrace(step=state.step)
             action = await self._next_action(state, trace, metrics)
-            apply_state_update(action.state_update, state)
+            _apply_memory(action.memory, state)
 
             if isinstance(action, ExecuteBrowserCode):
                 await self._execute_browser_code(action, state, worker, trace, metrics)
@@ -180,8 +184,8 @@ class Controller:
         trace.execution_duration_seconds = perf_counter() - started
         execution = _response_dataclass(response, "execution", ExecutionResult)
         observation = _response_dataclass(response, "observation", BrowserObservation)
-        store_execution(state, execution, step=state.step)
-        store_observation(state, observation, step=state.step)
+        state.last_execution = execution
+        state.observation = observation
         state.consecutive_failures = (
             0 if execution.success else state.consecutive_failures + 1
         )

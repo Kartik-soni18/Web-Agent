@@ -10,7 +10,7 @@ from src.openrouter_adapter import OpenRouterActionProvider
 
 MODEL = "z-ai/glm-5.3-flash"
 TASKS = [
-    "Go to Wikipedia, find the article for Alan Turing, and tell me his place of birth and the university where he studied as an undergraduate "
+    "Go to Amazon and find the best watch as per rating under 10234rs"
 ]
 
 
