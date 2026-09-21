@@ -10,7 +10,7 @@ from src.openrouter_adapter import OpenRouterActionProvider
 
 MODEL = "z-ai/glm-5.3-flash"
 TASKS = [
-    "Go to the SEC EDGAR public search. Locate the latest 10-K filing for two competing public tech companies, find their reported R&D expenditures for the fiscal year, calculate the year-over-year percentage change for both, and identify which company increased their R&D spend by a higher percentage."
+    "Go to Wikipedia, find the article for Alan Turing, and tell me his place of birth and the university where he studied as an undergraduate "
 ]
 
 

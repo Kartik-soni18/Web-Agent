@@ -331,13 +331,15 @@ class OpenRouterActionProvider:
                 "model returned ordinary text instead of a tool call; choose an "
                 "OpenRouter model that supports tool calling"
             )
-        if len(tool_calls) != 1:
-            raise ModelActionError("model must return exactly one tool call")
-
-        tool_call = tool_calls[0]
-        if tool_call.type != "function":
-            raise ModelActionError("model returned a non-function tool call")
-        return _parse_action(tool_call.function.name, tool_call.function.arguments)
+        actions = []
+        for tool_call in tool_calls:
+            if tool_call.type != "function":
+                raise ModelActionError("model returned a non-function tool call")
+            actions.append(_parse_action(tool_call.function.name, tool_call.function.arguments))
+        # Some responses repeat the same action with different call IDs or JSON spacing.
+        if any(action != actions[0] for action in actions[1:]):
+            raise ModelActionError("model must return exactly one distinct tool action")
+        return actions[0]
 
     async def close(self) -> None:
         await self.client.close()
