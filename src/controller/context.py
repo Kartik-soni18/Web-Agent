@@ -1,6 +1,6 @@
 from dataclasses import asdict
 
-from ..clean_tree.accessibility_tree import render_accessibility_tree
+from ..accessibility import render_accessibility_tree
 from ..models.state import AgentState
 from .api import ModelContext
 

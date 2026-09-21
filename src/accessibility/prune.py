@@ -1,39 +1,8 @@
-"""Turn Chromium's verbose raw accessibility tree into an agent observation."""
+"""Convert Chromium's raw accessibility protocol response into a compact tree."""
 
-import json
 from typing import Any
 
-ACTIONABLE_ROLES = {
-    "button",
-    "checkbox",
-    "combobox",
-    "link",
-    "menuitem",
-    "menuitemcheckbox",
-    "menuitemradio",
-    "option",
-    "radio",
-    "searchbox",
-    "slider",
-    "spinbutton",
-    "switch",
-    "tab",
-    "textbox",
-    "treeitem",
-}
-SKIPPED_ROLES = {"InlineTextBox", "LineBreak", "ListMarker", "none", "presentation"}
-STATE_NAMES = {
-    "checked",
-    "disabled",
-    "expanded",
-    "focused",
-    "hasPopup",
-    "level",
-    "pressed",
-    "required",
-    "selected",
-    "url",
-}
+from .constants import ACTIONABLE_ROLES, SKIPPED_ROLES, STATE_NAMES
 
 
 def _value(item: dict[str, Any], key: str = "value") -> Any:
@@ -52,7 +21,9 @@ def _state(node: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def prune_accessibility_tree(tree: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def prune_full_accessibility_tree(
+    tree: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
     nodes = {node["nodeId"]: node for node in tree.get("nodes", [])}
     references = 0
 
@@ -78,7 +49,7 @@ def prune_accessibility_tree(tree: dict[str, Any]) -> dict[str, list[dict[str, A
             for child in visit(child_id, name or parent_name, ancestors | {node_id})
         ]
         if skip:
-            return children  # Preserve descendants when this node is only noise.
+            return children
 
         observation: dict[str, Any] = {"role": role}
         if name:
@@ -96,30 +67,3 @@ def prune_accessibility_tree(tree: dict[str, Any]) -> dict[str, list[dict[str, A
     return {
         "nodes": [child for root in roots for child in visit(root, "", frozenset())]
     }
-
-
-def render_accessibility_tree(tree: dict[str, list[dict[str, Any]]]) -> str:
-    lines = []
-
-    def visit(node: dict[str, Any], depth: int) -> None:
-        parts = [node["role"]]
-
-        if node.get("name"):
-            parts.append(json.dumps(node["name"], ensure_ascii=False))
-
-        if node.get("state"):
-            states = ", ".join(
-                f"{key}={json.dumps(value, ensure_ascii=False)}"
-                for key, value in node["state"].items()
-            )
-            parts.append(f"[{states}]")
-
-        lines.append("  " * depth + " ".join(parts))
-
-        for child in node.get("children", []):
-            visit(child, depth + 1)
-
-    for node in tree["nodes"]:
-        visit(node, 0)
-
-    return "\n".join(lines)

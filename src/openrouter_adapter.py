@@ -13,7 +13,8 @@ Call exactly one `act` tool on every turn. Its `action` is one of:
 
 * `execute_browser_code`: provide concise async Python/Playwright `code` and an `intent`;
 * `ask_user`: provide a `question` and an `intent` when required information or confirmation is missing;
-* `finish`: provide the final `answer` and a `success` boolean only after the task is complete.
+* `finish`: provide the final `answer` only after the task is complete; include
+  `success: false` only when reporting an unsuccessful result.
 
 Every action includes `memory`. Add only newly learned, useful facts to
 `memory.facts`; it is working memory, so keep facts short and do not repeat facts
@@ -62,7 +63,10 @@ TOOLS = [
                     },
                     "question": {"type": "string"},
                     "answer": {"type": "string"},
-                    "success": {"type": "boolean"},
+                    "success": {
+                        "type": "boolean",
+                        "description": "For finish only; omit for success or set false for failure.",
+                    },
                     "intent": {
                         "type": "string",
                         "description": "Why this browser or user action is needed.",
@@ -129,6 +133,8 @@ def _parse_action(raw_arguments: str) -> ExecuteBrowserCode | AskUser | Finish:
     action_fields = expected.get(action_name)
     if action_fields is None:
         raise ModelActionError(f"act has unknown action: {action_name}")
+    if action_name == "finish" and "success" not in arguments:
+        arguments["success"] = True
     _require_exact_keys(arguments, set(action_fields), f"act.{action_name}")
     for field, field_type in action_fields.items():
         if type(arguments[field]) is not field_type:

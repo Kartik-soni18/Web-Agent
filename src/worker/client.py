@@ -19,6 +19,8 @@ SAFE_ENVIRONMENT_NAMES = {
     "TMPDIR",
     "WINDIR",
 }
+# ponytail: 1 MiB supports typical pruned AX trees; use framed IPC for unbounded responses.
+WORKER_RESPONSE_LIMIT = 1024 * 1024
 
 
 def _worker_environment(project_root: Path) -> dict[str, str]:
@@ -113,6 +115,7 @@ class WorkerClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=WORKER_RESPONSE_LIMIT,
                 cwd=temporary_directory.name,
                 env=_worker_environment(project_root),
             )
@@ -172,4 +175,3 @@ class WorkerClient:
             await stderr_task
         if temporary_directory is not None:
             temporary_directory.cleanup()
-

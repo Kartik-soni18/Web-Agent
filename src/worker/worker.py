@@ -4,9 +4,10 @@ import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict
 from io import StringIO
-from typing import TextIO
+from typing import Any, TextIO
 
 from ..executor.exec import AsyncExecutor
+from ..models.observations import BrowserObservation
 from ..session.extract_observation import browser_observation
 from ..session.runtime import START_URL, Runtime, browser_runtime
 
@@ -17,6 +18,14 @@ class BrowserWorker:
         self._stack: AsyncExitStack | None = None
         self.runtime: Runtime | None = None
         self.executor: AsyncExecutor | None = None
+        self._previous_accessibility_tree: dict[str, list[dict[str, Any]]] | None = None
+
+    async def _observe(self, runtime: Runtime) -> BrowserObservation:
+        observation = await browser_observation(
+            runtime.page, self._previous_accessibility_tree
+        )
+        self._previous_accessibility_tree = observation.accessibility_tree
+        return observation
 
     async def start(self) -> dict[str, object]:
         if self.runtime is not None:
@@ -26,7 +35,7 @@ class BrowserWorker:
         try:
             runtime = await stack.enter_async_context(browser_runtime(self.start_url))
             executor = AsyncExecutor(runtime.execution_namespace())
-            observation = await browser_observation(runtime.page)
+            observation = await self._observe(runtime)
         except Exception:
             await stack.aclose()
             raise
@@ -48,7 +57,7 @@ class BrowserWorker:
     async def execute(self, code: str) -> dict[str, object]:
         runtime, executor = self._require_started()
         execution = await executor.execute(code)
-        observation = await browser_observation(runtime.page)
+        observation = await self._observe(runtime)
         return {
             "ok": True,
             "type": "executed",
@@ -58,7 +67,7 @@ class BrowserWorker:
 
     async def observe(self) -> dict[str, object]:
         runtime, _ = self._require_started()
-        observation = await browser_observation(runtime.page)
+        observation = await self._observe(runtime)
         return {
             "ok": True,
             "type": "observed",
@@ -70,6 +79,7 @@ class BrowserWorker:
         self._stack = None
         self.runtime = None
         self.executor = None
+        self._previous_accessibility_tree = None
         if stack is not None:
             await stack.aclose()
         return {"ok": True, "type": "closed"}
@@ -136,4 +146,3 @@ async def serve(
 
 if __name__ == "__main__":
     asyncio.run(serve())
-
