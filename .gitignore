@@ -5,3 +5,4 @@ output/*
 PLAN.MD
 test_*
 .env
+node_modules/

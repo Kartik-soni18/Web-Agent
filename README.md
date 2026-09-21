@@ -1,9 +1,10 @@
 # Web Agent
 
 Web Agent is an experimental AI browser agent for automating everyday web-based
-tasks. It asks an OpenRouter model to write async Playwright Python, executes that
-code in a child worker, and keeps the same browser and Python namespace alive across
-multiple steps.
+tasks. It asks an OpenRouter model to write async Playwright JavaScript and executes
+that code in a Node.js child worker. The browser and a shared `state` object stay
+alive across steps; local variables belong to each snippet. Python manages the
+agent loop, model calls, memory, metrics, and accessibility-tree processing.
 
 The project currently:
 
@@ -25,7 +26,7 @@ The project currently:
 
 ## Setup and run
 
-Create a `.env` file containing:
+Install Node.js 24 or newer, and create a `.env` file containing:
 
 ```env
 OPENROUTER_API_KEY=your_key_here
@@ -35,12 +36,13 @@ Install the project and Chromium, then run the agent:
 
 ```bash
 uv sync
-uv run playwright install chromium
+npm ci
+npx playwright install chromium
 uv run python main.py --allow-unsafe-exec
 ```
 
 > [!WARNING]
-> The model generates and executes arbitrary Python code. It may execute unwanted
+> The model generates and executes arbitrary JavaScript code. It may execute unwanted
 > code, access or modify files available to your OS user, or perform unintended web
 > actions. The child worker is not a security sandbox. Run this project only in an
 > environment where that risk is acceptable.

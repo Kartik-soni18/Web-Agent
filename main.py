@@ -10,7 +10,7 @@ from src.openrouter_adapter import OpenRouterActionProvider
 
 MODEL = "z-ai/glm-5.3-flash"
 TASKS = [
-    "FInd out detail of next codeforces contest and the last codeforces contest"
+    "Go to Wikipedia. Find the article for Grace Hopper. Determine where she earned her PhD, then open the Wikipedia article for that university and tell me the year it was founded."
 ]
 
 
@@ -19,7 +19,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-unsafe-exec",
         action="store_true",
-        help="allow model-generated Python to run with your OS user permissions",
+        help="allow model-generated JavaScript to run with your OS user permissions",
     )
     return parser
 
@@ -49,7 +49,7 @@ def main() -> int:
     args = parser.parse_args()
     if not args.allow_unsafe_exec:
         parser.error(
-            "--allow-unsafe-exec is required because generated Python is not sandboxed"
+            "--allow-unsafe-exec is required because generated JavaScript is not sandboxed"
         )
 
     load_dotenv()

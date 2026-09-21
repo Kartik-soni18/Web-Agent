@@ -8,6 +8,5 @@ dependencies = [
     "aiofiles>=25.1.0",
     "dotenv>=0.9.9",
     "openai>=1.0.0",
-    "playwright",
     "requests>=2.34.2",
 ]

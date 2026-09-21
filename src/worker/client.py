@@ -1,9 +1,12 @@
 import asyncio
 import json
 import os
-import sys
+from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
+
+from ..session.extract_observation import browser_observation
 
 
 SAFE_ENVIRONMENT_NAMES = {
@@ -19,19 +22,15 @@ SAFE_ENVIRONMENT_NAMES = {
     "TMPDIR",
     "WINDIR",
 }
-# ponytail: 1 MiB supports typical pruned AX trees; use framed IPC for unbounded responses.
 WORKER_RESPONSE_LIMIT = 1024 * 1024
 
 
-def _worker_environment(project_root: Path) -> dict[str, str]:
-    environment = {
+def _worker_environment() -> dict[str, str]:
+    return {
         name: value
         for name, value in os.environ.items()
         if name in SAFE_ENVIRONMENT_NAMES or name.startswith("LC_")
     }
-    environment["PYTHONPATH"] = str(project_root)
-    environment["PYTHONUNBUFFERED"] = "1"
-    return environment
 
 
 class WorkerClient:
@@ -41,6 +40,7 @@ class WorkerClient:
         self._request_lock = asyncio.Lock()
         self._stderr_chunks: list[bytes] = []
         self._stderr_task: asyncio.Task[None] | None = None
+        self._previous_accessibility_tree: dict[str, list[dict[str, Any]]] | None = None
 
     async def __aenter__(self) -> "WorkerClient":
         await self.start()
@@ -99,27 +99,36 @@ class WorkerClient:
                 raise RuntimeError("worker response must be a JSON object")
             if response.get("ok") is not True:
                 raise RuntimeError(str(response.get("error", "unknown worker error")))
+            if "observation" in response:
+                observation = browser_observation(
+                    **response["observation"],
+                    previous_tree=self._previous_accessibility_tree,
+                )
+                self._previous_accessibility_tree = observation.accessibility_tree
+                response["observation"] = asdict(observation)
             return response
 
     async def start(self) -> dict[str, object]:
         if self.process is not None:
             raise RuntimeError("worker process is already started")
 
-        project_root = Path(__file__).resolve().parents[2]
+        worker_module = Path(__file__).with_name("worker.cjs").resolve()
         temporary_directory = TemporaryDirectory(prefix="web-agent-worker-")
         try:
             process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "src.worker.worker",
+                "node",
+                "-e",
+                "require(process.argv[1]).serve().catch(error => { "
+                "console.error(error); process.exit(1); });",
+                str(worker_module),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=WORKER_RESPONSE_LIMIT,
                 cwd=temporary_directory.name,
-                env=_worker_environment(project_root),
+                env=_worker_environment(),
             )
-        except Exception:
+        except BaseException:
             temporary_directory.cleanup()
             raise
 
@@ -131,7 +140,7 @@ class WorkerClient:
 
         try:
             return await self._request({"type": "start"})
-        except Exception:
+        except BaseException:
             await self._stop_process(terminate=True)
             raise
 
@@ -149,7 +158,7 @@ class WorkerClient:
 
         try:
             response = await self._request({"type": "close"})
-        except Exception:
+        except BaseException:
             await self._stop_process(terminate=True)
             raise
 
@@ -163,6 +172,7 @@ class WorkerClient:
         self.process = None
         self._stderr_task = None
         self._temporary_directory = None
+        self._previous_accessibility_tree = None
 
         if process is not None:
             if process.stdin is not None:
