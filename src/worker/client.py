@@ -1,12 +1,8 @@
 import asyncio
 import json
 import os
-from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
-
-from ..session.extract_observation import browser_observation
 
 
 SAFE_ENVIRONMENT_NAMES = {
@@ -40,7 +36,6 @@ class WorkerClient:
         self._request_lock = asyncio.Lock()
         self._stderr_chunks: list[bytes] = []
         self._stderr_task: asyncio.Task[None] | None = None
-        self._previous_accessibility_tree: dict[str, list[dict[str, Any]]] | None = None
 
     async def __aenter__(self) -> "WorkerClient":
         await self.start()
@@ -99,13 +94,6 @@ class WorkerClient:
                 raise RuntimeError("worker response must be a JSON object")
             if response.get("ok") is not True:
                 raise RuntimeError(str(response.get("error", "unknown worker error")))
-            if "observation" in response:
-                observation = browser_observation(
-                    **response["observation"],
-                    previous_tree=self._previous_accessibility_tree,
-                )
-                self._previous_accessibility_tree = observation.accessibility_tree
-                response["observation"] = asdict(observation)
             return response
 
     async def start(self) -> dict[str, object]:
@@ -172,7 +160,6 @@ class WorkerClient:
         self.process = None
         self._stderr_task = None
         self._temporary_directory = None
-        self._previous_accessibility_tree = None
 
         if process is not None:
             if process.stdin is not None:

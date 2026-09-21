@@ -4,7 +4,9 @@ Web Agent is an experimental AI browser agent for automating everyday web-based
 tasks. It asks an OpenRouter model to write async Playwright JavaScript and executes
 that code in a Node.js child worker. The browser and a shared `state` object stay
 alive across steps; local variables belong to each snippet. Python manages the
-agent loop, model calls, memory, metrics, and accessibility-tree processing.
+agent loop, model calls, memory, metrics, and model-context formatting. The same
+Node worker collects, prunes, and simplifies accessibility trees synchronously
+before sending observations to Python.
 
 The project currently:
 
