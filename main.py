@@ -8,10 +8,10 @@ from src.controller import Controller
 from src.openrouter_adapter import OpenRouterActionProvider
 
 
-MODEL = "deepseek/deepseek-v4.1-flash"
-TASK = (
-    "On Google Flights, find the cheapest Jaipur-to-Bengaluru round trip for any five-day stay next month. Compare it with the shortest itinerary and report dates, airline, stops, duration, price, currency, and source URL—without booking."
-)
+MODEL = "z-ai/glm-5.3-flash"
+TASKS = [
+    "Go to the SEC EDGAR public search. Locate the latest 10-K filing for two competing public tech companies, find their reported R&D expenditures for the fiscal year, calculate the year-over-year percentage change for both, and identify which company increased their R&D spend by a higher percentage."
+]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -26,12 +26,22 @@ def _parser() -> argparse.ArgumentParser:
 
 async def _run(api_key: str) -> int:
     provider = OpenRouterActionProvider(api_key=api_key, model=MODEL)
+    exit_code = 0
     try:
-        result = await Controller(provider).run(TASK)
+        for index, task in enumerate(TASKS, start=1):
+            print(f"Task {index}/{len(TASKS)}: {task}", flush=True)
+            try:
+                result = await Controller(provider).run(task)
+            except Exception as error:
+                print(f"Task failed: {type(error).__name__}: {error}", flush=True)
+                exit_code = 1
+                continue
+            print(result.answer, flush=True)
+            if not result.success:
+                exit_code = 1
     finally:
         await provider.close()
-    print(result.answer)
-    return 0 if result.success else 1
+    return exit_code
 
 
 def main() -> int:

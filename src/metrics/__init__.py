@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
-METRICS_PATH = Path(__file__).resolve().parents[2] / "output" / "metrics.json"
+METRICS_DIR = Path(__file__).resolve().parents[2] / "output" / "metrics"
 
 
 def _utc_now() -> str:
@@ -25,6 +25,8 @@ class RunTrace:
     total_tokens: int = 0
     cost_usd: float = 0.0
     response_model: str | None = None
+    llm_request: dict[str, object] | None = None
+    llm_response: dict[str, object] | None = None
     success: bool | None = None
     error_type: str | None = None
     error_message: str | None = None
@@ -103,7 +105,9 @@ class RunMetrics:
             self.error_type = type(error).__name__
             self.error_message = str(error)
 
-    def save(self, path: Path = METRICS_PATH) -> None:
+    def save(self, path: Path | None = None) -> None:
+        if path is None:
+            path = METRICS_DIR / f"{self.run_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = path.with_suffix(".tmp")
         temporary_path.write_text(

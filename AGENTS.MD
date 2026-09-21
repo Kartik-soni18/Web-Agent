@@ -29,4 +29,11 @@ Rules:
 
 Not lazy about: understanding the problem (read it fully and trace the real flow before picking a rung, a small diff you don't understand is just laziness dressed up as efficiency), input validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs (the platform is never the spec ideal, a clock drifts, a sensor reads off), anything explicitly requested. Lazy code without its check is unfinished: non-trivial logic leaves ONE runnable check behind, the smallest thing that fails if the logic breaks (an assert-based demo/self-check or one small test file; no frameworks, no fixtures). Trivial one-liners need no test.
 
+Do not add tests, test files, test frameworks, or assertions unless explicitly requested. Remove any tests or assertions you previously added.
+main.py must remain the single entry point for running the project. Do not create additional runner, demo, example, CLI, or entry-point files.
+Do not add temporary, defensive, placeholder, compatibility, validation, logging, or “just to confirm it works” code unless it is required for the requested functionality.
+Keep changes minimal and scoped strictly to the user's request. Do not add unrelated refactors, abstractions, helper files, documentation, or boilerplate.
+Before finishing, remove any temporary/debug code introduced while implementing the change.
+
+
 (Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)

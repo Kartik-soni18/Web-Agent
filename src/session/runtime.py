@@ -12,7 +12,7 @@ from playwright.async_api import (
 )
 
 
-START_URL = "https://duckduckgo.com/"
+START_URL = "about:blank"
 
 
 @dataclass
