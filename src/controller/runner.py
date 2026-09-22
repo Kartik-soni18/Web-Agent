@@ -4,6 +4,8 @@ from dataclasses import asdict
 from time import perf_counter
 from typing import TypeVar
 
+from langgraph.graph import END, START, StateGraph
+
 from ..metrics import RunMetrics, RunTrace
 from ..models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 from ..models.execution import ExecutionResult
@@ -49,12 +51,12 @@ async def prompt_user(question: str) -> str:
 class Controller:
     def __init__(
         self,
-        action_provider: ActionProvider,
+        action_providers: dict[str, ActionProvider],
         *,
         ask_user: AskUserCallback = prompt_user,
         worker_factory: Callable[[], WorkerClient] = WorkerClient,
     ) -> None:
-        self.action_provider = action_provider
+        self.action_providers = action_providers
         self.ask_user = ask_user
         self.worker_factory = worker_factory
         self.state: AgentState | None = None
@@ -69,7 +71,10 @@ class Controller:
         worker = self.worker_factory()
         metrics = RunMetrics(
             task=task,
-            model=str(getattr(self.action_provider, "model", "unknown")),
+            models={
+                agent: str(getattr(provider, "model", "unknown"))
+                for agent, provider in self.action_providers.items()
+            },
         )
         self.metrics = metrics
         run_started = perf_counter()
@@ -115,40 +120,61 @@ class Controller:
     async def _run_steps(
         self, state: AgentState, worker: WorkerClient, metrics: RunMetrics
     ) -> Finish:
-        while True:
+        async def step(state: AgentState) -> dict[str, object]:
+            self.state = state
             state.step += 1
-            trace = RunTrace(step=state.step)
+            trace = RunTrace(step=state.step, agent=state.agent)
             action = await self._next_action(state, trace, metrics)
-            _apply_memory(action.memory, state)
+            if state.agent != "starter":
+                _apply_memory(action.memory, state)
 
             if isinstance(action, ExecuteBrowserCode):
                 await self._execute_browser_code(action, state, worker, trace, metrics)
-                continue
-            if isinstance(action, AskUser):
+            elif isinstance(action, AskUser):
                 await self._ask_for_clarification(action, state)
                 trace.success = True
                 metrics.add_trace(trace)
-                continue
-            if isinstance(action, Finish):
+            elif isinstance(action, Finish):
                 trace.success = action.success
                 metrics.add_trace(trace)
-                return action
+                state.result = action
+            else:
+                trace.success = False
+                trace.error_type = "unsupported_action"
+                metrics.add_trace(trace)
+                raise TypeError(f"unsupported controller action: {type(action).__name__}")
 
-            trace.success = False
-            trace.error_type = "unsupported_action"
-            metrics.add_trace(trace)
-            raise TypeError(f"unsupported controller action: {type(action).__name__}")
+            if state.agent == "starter":
+                state.agent = "mid"
+                state.result = None
+            elif isinstance(action, ExecuteBrowserCode) and not trace.success:
+                state.agent = "big"
+            return vars(state)
+
+        graph = StateGraph(AgentState)
+        for agent in ("starter", "mid", "big"):
+            graph.add_node(agent, step)
+            graph.add_conditional_edges(
+                agent,
+                lambda state: END if state.result is not None else state.agent,
+                ["mid", "big", END],
+            )
+        graph.add_edge(START, "starter")
+        result = await graph.compile().ainvoke(vars(state))
+        self.state = AgentState(**result)
+        return result["result"]
 
     async def _next_action(
         self, state: AgentState, trace: RunTrace, metrics: RunMetrics
     ) -> Action:
         started = perf_counter()
+        provider = self.action_providers[state.agent]
         try:
-            action = await self.action_provider.next_action(build_model_context(state))
+            action = await provider.next_action(build_model_context(state))
         except BaseException as error:
             trace.llm_duration_seconds = perf_counter() - started
             _record_exception(trace, error, "model_error")
-            self._record_usage(trace)
+            self._record_usage(trace, provider)
             try:
                 metrics.add_trace(trace)
             except Exception as save_error:
@@ -158,7 +184,7 @@ class Controller:
         trace.llm_duration_seconds = perf_counter() - started
         trace.action = ACTION_NAMES.get(type(action), type(action).__name__)
         trace.action_payload = asdict(action)
-        self._record_usage(trace)
+        self._record_usage(trace, provider)
         return action
 
     async def _execute_browser_code(
@@ -205,10 +231,10 @@ class Controller:
             raise TypeError("ask_user callback must return a string")
         state.clarifications.append(f"Question: {action.question}\nAnswer: {answer}")
 
-    def _record_usage(self, trace: RunTrace) -> None:
-        trace.llm_request = getattr(self.action_provider, "last_request", None)
-        trace.llm_response = getattr(self.action_provider, "last_response", None)
-        usage = getattr(self.action_provider, "last_usage", {})
+    def _record_usage(self, trace: RunTrace, provider: ActionProvider) -> None:
+        trace.llm_request = getattr(provider, "last_request", None)
+        trace.llm_response = getattr(provider, "last_response", None)
+        usage = getattr(provider, "last_usage", {})
         if not isinstance(usage, dict):
             return
         trace.input_tokens = int(usage.get("input_tokens", 0))

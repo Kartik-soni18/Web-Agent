@@ -8,6 +8,9 @@ from .api import ModelContext
 def build_model_context(state: AgentState) -> ModelContext:
     """Build a compact view of the state needed for the next model action."""
 
+    if state.agent == "starter":
+        return {"original_task": state.task}
+
     return {
         "original_task": state.task,
         "user_clarifications": list(state.clarifications),

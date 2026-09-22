@@ -15,6 +15,7 @@ def _utc_now() -> str:
 @dataclass
 class RunTrace:
     step: int
+    agent: str
     started_at: str = field(default_factory=_utc_now)
     action: str | None = None
     action_payload: dict[str, object] = field(default_factory=dict)
@@ -36,7 +37,7 @@ class RunTrace:
 @dataclass
 class RunMetrics:
     task: str
-    model: str
+    models: dict[str, str]
     run_id: str = field(default_factory=lambda: str(uuid4()))
     started_at: str = field(default_factory=_utc_now)
     ended_at: str | None = None

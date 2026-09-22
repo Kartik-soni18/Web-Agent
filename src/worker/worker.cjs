@@ -238,7 +238,7 @@ exports.serve = async function () {
     if (message.type === 'start') {
       if (browser) throw new Error('worker is already started');
       try {
-        browser = await playwright.chromium.launch({ headless: false, slowMo: 250 });
+        browser = await playwright.chromium.launch({ headless: true });
         context = await browser.newContext();
         page = await context.newPage();
         await page.goto('about:blank');

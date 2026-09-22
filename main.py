@@ -8,11 +8,14 @@ from src.controller import Controller
 from src.openrouter_adapter import OpenRouterActionProvider
 
 
-MODEL = "z-ai/glm-5.3-flash"
+MODELS = {
+    "starter": "openai/gpt-oss-20b",
+    "mid": "z-ai/glm-5.3-flash",
+    "big": "z-ai/glm-5.3-flash",
+}
 TASKS = [
-    "Go to Wikipedia. Find the article for Grace Hopper. Determine where she earned her PhD, then open the Wikipedia article for that university and tell me the year it was founded."
+    "Go to chroma store and find the best iphone under 20k"
 ]
-
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the persistent browser agent")
@@ -25,13 +28,18 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _run(api_key: str) -> int:
-    provider = OpenRouterActionProvider(api_key=api_key, model=MODEL)
+    providers = {
+        agent: OpenRouterActionProvider(
+            api_key=api_key, model=model, starter=agent == "starter"
+        )
+        for agent, model in MODELS.items()
+    }
     exit_code = 0
     try:
         for index, task in enumerate(TASKS, start=1):
             print(f"Task {index}/{len(TASKS)}: {task}", flush=True)
             try:
-                result = await Controller(provider).run(task)
+                result = await Controller(providers).run(task)
             except Exception as error:
                 print(f"Task failed: {type(error).__name__}: {error}", flush=True)
                 exit_code = 1
@@ -40,7 +48,7 @@ async def _run(api_key: str) -> int:
             if not result.success:
                 exit_code = 1
     finally:
-        await provider.close()
+        await asyncio.gather(*(provider.close() for provider in providers.values()))
     return exit_code
 
 
