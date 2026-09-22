@@ -45,6 +45,10 @@ Code runs as an async function in Node.js with `playwright`, `browser`, `context
 `await page.getByRole('button', { name: 'Search' }).click()`. Await all asynchronous
 work before the snippet finishes; do not leave background tasks running. Use an
 explicit `return` to provide a result, or `console.log` for captured output.
+The page outline and execution output are bounded. A dialog or main region appears
+first. If relevant content is missing or marked truncated, inspect a specific
+locator with `ariaSnapshot()`, `innerText()`, or `getAttribute('href')` and return
+only the portion needed for the task. Do not dump the whole page again.
 The browser and `state` persist for the task, but local variables do not persist
 between snippets. For example, one step can run
 `state.price = await page.locator('.price').innerText(); return state.price;`
