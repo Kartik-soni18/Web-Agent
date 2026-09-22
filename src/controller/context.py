@@ -25,6 +25,13 @@ def build_model_context(state: AgentState) -> ModelContext:
             "facts": list(state.facts),
             "remaining": list(state.remaining_requirements),
         },
+        "recent_actions": list(state.recent_actions),
+        "stalled_page": (
+            "The URL, title, and page outline have not changed after multiple actions. "
+            "Use a different source or report the block instead of waiting again."
+            if state.unchanged_observations >= 2
+            else None
+        ),
         "last_execution_result": execution,
         "current_browser_observation": {
             "trust": (

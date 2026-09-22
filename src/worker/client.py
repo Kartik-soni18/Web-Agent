@@ -153,6 +153,9 @@ class WorkerClient:
         await self._stop_process(terminate=False)
         return response
 
+    async def abort(self) -> None:
+        await self._stop_process(terminate=True)
+
     async def _stop_process(self, *, terminate: bool) -> None:
         process = self.process
         stderr_task = self._stderr_task
@@ -165,7 +168,10 @@ class WorkerClient:
             if process.stdin is not None:
                 process.stdin.close()
             if terminate and process.returncode is None:
-                process.terminate()
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
             await process.wait()
 
         if stderr_task is not None:

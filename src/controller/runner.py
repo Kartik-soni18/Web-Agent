@@ -11,12 +11,18 @@ from ..models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 from ..models.execution import ExecutionResult
 from ..models.observations import BrowserObservation
 from ..models.state import AgentState
+from ..openrouter_adapter import ModelActionError
 from ..worker.client import WorkerClient
 from .api import ACTION_NAMES, Action, ActionProvider, AskUserCallback
 from .context import build_model_context
 
 
 Response = TypeVar("Response")
+# ponytail: fixed budgets can cut off valid long tasks; expose per-task limits if measured tasks need them.
+MAX_STEPS = 16
+MAX_RUN_SECONDS = 300
+MODEL_CALL_SECONDS = 90
+WORKER_CALL_SECONDS = 45
 
 
 def _response_dataclass(
@@ -78,17 +84,18 @@ class Controller:
         )
         self.metrics = metrics
         run_started = perf_counter()
+        deadline = run_started + MAX_RUN_SECONDS
         final_answer = None
         final_success = False
         run_error: BaseException | None = None
 
         try:
-            started = await worker.start()
+            started = await asyncio.wait_for(worker.start(), timeout=WORKER_CALL_SECONDS)
             observation = _response_dataclass(
                 started, "observation", BrowserObservation
             )
             state.observation = observation
-            result = await self._run_steps(state, worker, metrics)
+            result = await self._run_steps(state, worker, metrics, deadline)
             final_answer = result.answer
             final_success = result.success
             return result
@@ -97,8 +104,10 @@ class Controller:
             raise
         finally:
             try:
-                await worker.close()
+                await asyncio.wait_for(worker.close(), timeout=10)
             except BaseException as error:
+                if isinstance(error, TimeoutError):
+                    await worker.abort()
                 metrics.record_cleanup_error(error)
                 if run_error is None:
                     run_error = error
@@ -118,23 +127,36 @@ class Controller:
                     run_error.add_note(f"Metrics save failed: {save_error}")
 
     async def _run_steps(
-        self, state: AgentState, worker: WorkerClient, metrics: RunMetrics
+        self, state: AgentState, worker: WorkerClient, metrics: RunMetrics,
+        deadline: float,
     ) -> Finish:
         async def step(state: AgentState) -> dict[str, object]:
             self.state = state
+            if state.step >= MAX_STEPS or perf_counter() >= deadline:
+                reason = (
+                    f"{MAX_STEPS} steps" if state.step >= MAX_STEPS
+                    else f"{MAX_RUN_SECONDS} seconds"
+                )
+                state.result = Finish(
+                    answer=f"Stopped after {reason} without completing the task.",
+                    success=False,
+                )
+                return vars(state)
             state.step += 1
             trace = RunTrace(step=state.step, agent=state.agent)
-            action = await self._next_action(state, trace, metrics)
-            if state.agent != "starter":
-                _apply_memory(action.memory, state)
+            action = await self._next_action(state, trace, metrics, deadline)
 
             if isinstance(action, ExecuteBrowserCode):
-                await self._execute_browser_code(action, state, worker, trace, metrics)
+                await self._execute_browser_code(action, state, worker, trace, metrics, deadline)
+                if trace.success and state.agent != "starter":
+                    _apply_memory(action.memory, state)
             elif isinstance(action, AskUser):
                 await self._ask_for_clarification(action, state)
+                _apply_memory(action.memory, state)
                 trace.success = True
                 metrics.add_trace(trace)
             elif isinstance(action, Finish):
+                _apply_memory(action.memory, state)
                 trace.success = action.success
                 metrics.add_trace(trace)
                 state.result = action
@@ -165,16 +187,35 @@ class Controller:
         return result["result"]
 
     async def _next_action(
-        self, state: AgentState, trace: RunTrace, metrics: RunMetrics
+        self, state: AgentState, trace: RunTrace, metrics: RunMetrics,
+        deadline: float,
     ) -> Action:
         started = perf_counter()
         provider = self.action_providers[state.agent]
+        context = build_model_context(state)
         try:
-            action = await provider.next_action(build_model_context(state))
+            for attempt in range(2):
+                timeout = min(MODEL_CALL_SECONDS, max(0, deadline - perf_counter()))
+                trace.model_attempts += 1
+                try:
+                    action = await asyncio.wait_for(
+                        provider.next_action(context), timeout=timeout,
+                    )
+                    break
+                except (TimeoutError, ModelActionError) as error:
+                    if attempt or perf_counter() >= deadline:
+                        if isinstance(error, TimeoutError):
+                            raise TimeoutError(f"model call exceeded {timeout:.0f} seconds") from error
+                        raise
+                    context = {
+                        **context,
+                        "previous_model_error": str(error) or "model response timed out",
+                    }
+                finally:
+                    self._record_usage(trace, provider)
         except BaseException as error:
             trace.llm_duration_seconds = perf_counter() - started
             _record_exception(trace, error, "model_error")
-            self._record_usage(trace, provider)
             try:
                 metrics.add_trace(trace)
             except Exception as save_error:
@@ -184,7 +225,6 @@ class Controller:
         trace.llm_duration_seconds = perf_counter() - started
         trace.action = ACTION_NAMES.get(type(action), type(action).__name__)
         trace.action_payload = asdict(action)
-        self._record_usage(trace, provider)
         return action
 
     async def _execute_browser_code(
@@ -194,13 +234,23 @@ class Controller:
         worker: WorkerClient,
         trace: RunTrace,
         metrics: RunMetrics,
+        deadline: float,
     ) -> None:
         started = perf_counter()
+        timeout = min(WORKER_CALL_SECONDS, max(0, deadline - perf_counter()))
         try:
-            response = await worker.execute(action.code)
+            response = await asyncio.wait_for(
+                worker.execute(action.code), timeout=timeout,
+            )
         except BaseException as error:
             trace.execution_duration_seconds = perf_counter() - started
             _record_exception(trace, error, "worker_error")
+            if isinstance(error, TimeoutError):
+                trace.error_message = f"worker call exceeded {timeout:.0f} seconds"
+                try:
+                    await worker.abort()
+                except Exception as abort_error:
+                    error.add_note(f"Worker abort failed: {abort_error}")
             try:
                 metrics.add_trace(trace)
             except Exception as save_error:
@@ -210,8 +260,22 @@ class Controller:
         trace.execution_duration_seconds = perf_counter() - started
         execution = _response_dataclass(response, "execution", ExecutionResult)
         observation = _response_dataclass(response, "observation", BrowserObservation)
+        previous = state.observation
         state.last_execution = execution
         state.observation = observation
+        state.unchanged_observations = (
+            state.unchanged_observations + 1
+            if previous is not None
+            and previous.url == observation.url
+            and previous.title == observation.title
+            and previous.accessibility_tree == observation.accessibility_tree
+            else 0
+        )
+        state.recent_actions = [
+            *state.recent_actions[-2:],
+            f"{action.intent}: code {'ran' if execution.success else 'failed'}; "
+            f"now at {observation.url}",
+        ]
         state.consecutive_failures = (
             0 if execution.success else state.consecutive_failures + 1
         )
@@ -237,10 +301,10 @@ class Controller:
         usage = getattr(provider, "last_usage", {})
         if not isinstance(usage, dict):
             return
-        trace.input_tokens = int(usage.get("input_tokens", 0))
-        trace.output_tokens = int(usage.get("output_tokens", 0))
-        trace.total_tokens = int(usage.get("total_tokens", 0))
-        trace.cost_usd = float(usage.get("cost_usd", 0.0))
+        trace.input_tokens += int(usage.get("input_tokens", 0))
+        trace.output_tokens += int(usage.get("output_tokens", 0))
+        trace.total_tokens += int(usage.get("total_tokens", 0))
+        trace.cost_usd += float(usage.get("cost_usd", 0.0))
         response_model = usage.get("response_model")
         trace.response_model = (
             response_model if isinstance(response_model, str) else None

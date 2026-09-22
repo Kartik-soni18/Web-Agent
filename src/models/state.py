@@ -16,5 +16,7 @@ class AgentState:
     last_execution: ExecutionResult | None = None
     facts: list[str] = field(default_factory=list)
     remaining_requirements: list[str] = field(default_factory=list)
+    recent_actions: list[str] = field(default_factory=list)
+    unchanged_observations: int = 0
     step: int = 0
     consecutive_failures: int = 0

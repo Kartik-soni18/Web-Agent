@@ -16,14 +16,14 @@ main.py (task and fixed starter / mid / big model IDs)
   -> worker.cjs executes model-written async JavaScript in Playwright,
      keeps browser/page/state, then reads and simplifies the full CDP AX tree
   -> Controller updates state and saves a trace under output/metrics/
-  -> repeat until the model returns finish or an exception aborts the run
+  -> repeat until finish, a bounded run limit, or an exception ends the run
 ```
 
 The key paths are `main.py`, `src/controller/runner.py`, `src/controller/context.py`, `src/openrouter_adapter.py`, `src/worker/client.py`, `src/worker/worker.cjs`, and `src/metrics/__init__.py`.
 
 ## Testing and observed behavior
 
-The five saved runs below are trace analysis, not reruns or an independent correctness benchmark. Their tasks differ. “Success” means the model returned `finish(success=true)`; the controller does not independently validate the answer. The live Selenium run used the existing model IDs and a temporary read-only question in `main.py`; the original question was restored immediately afterward. A first sandboxed attempt could not launch Chromium, so the live result below is from the permitted browser run.
+The five saved runs below are baseline trace analysis, not reruns or an independent correctness benchmark. Their tasks differ. “Success” means the model returned `finish(success=true)`; the controller does not independently validate the answer. The live Selenium run used the existing model IDs and a temporary read-only question in `main.py`; the original question was restored immediately afterward. A first sandboxed attempt could not launch Chromium, so the live result below is from the permitted browser run.
 
 | Test / trace | Duration | Model calls | Input / output tokens | Result and relevant observation |
 |---|---:|---:|---:|---|
@@ -46,4 +46,19 @@ Across the five saved runs: **36 model calls, 929.7 s, 129,657 input tokens, 65,
 
 ### Priority and measurement notes
 
-The first change should come before tuning prompts or model choice because the loop currently has no reliable stopping rule. The second addresses answer correctness and the malformed-tool failure observed live. The third addresses the large contexts visible in traces. Keep the model IDs in `main.py` fixed while measuring these changes. Use a small repeatable set of tasks with expected outputs, a blocked-site case, and a deliberately ambiguous comparison task; report verified success rate, steps, wall time, model time, and input/output tokens for each run. The current saved data cannot establish a percentage speedup or accuracy gain.
+The first change should come before tuning prompts or model choice because the baseline loop had no reliable stopping rule. The second addresses answer correctness and the malformed-tool failure observed live. The third addresses the large contexts visible in traces. Keep the model IDs in `main.py` fixed while measuring these changes. Use a small repeatable set of tasks with expected outputs, a blocked-site case, and a deliberately ambiguous comparison task; report verified success rate, steps, wall time, model time, and input/output tokens for each run. The saved baseline data cannot establish a percentage speedup or accuracy gain.
+
+## Changes and live tests on `codex/focused-observations`
+
+The first branch commit bounds page outlines and execution output. The current follow-up also limits steps and wall time, retries one malformed or timed-out model response, aborts a stuck worker, records recent actions and unchanged pages, and only commits action memory after successful execution. The starter now supplies a URL for controller-owned navigation. The worker rejects an unawaited async wrapper. OpenRouter requests use a low reasoning effort for mid/big actions to leave room for tool output. Model IDs in `main.py` remain unchanged.
+
+| Live task / trace | Duration | Calls | Input / output tokens | Outcome and lesson |
+|---|---:|---:|---:|---|
+| Books to Scrape, `c7036fd8` | 136.5 s | 5 | 8,338 / 3,292 | Correctly found the cheapest eligible book across three pages and opened its detail page. Verified against the site. |
+| Quotes to Scrape, `45e46e45` | 75.1 s | 3 | 2,052 / 6,358 | Worker crashed after the starter returned an unawaited async wrapper. Led to the URL-only starter and wrapper rejection. |
+| Hockey table, `4e2ef20b` | 98.3 s | 3 | 290 / 224 reported | Model timed out twice before extraction. Timed-out attempts may consume unreported tokens. Led to provider routing and a longer per-call limit. |
+| Laptop catalog, `39e98869` | 120.8 s | 6 | 14,299 / 18,268 | Failed. A wrong review selector produced no matches, then two replies exhausted the completion budget without a tool call. Led to a low reasoning effort and a prompt to check empty extractions. |
+| GPT-6 Sol price search, `031d9da5` | 32.6 s | 4 | 11,265 / 917 | Correct: Standard short-context input **$2** and output **$10** per million tokens, from [OpenAI pricing](https://developers.openai.com/api/docs/pricing). Search engine captcha was bypassed by navigating to the official page. |
+| AJAX film table, `a82bdb6b` | 13.5 s | 3 | 4,630 / 539 | Correct: 2015 winner among films with at least six nominations was *Mad Max: Fury Road*, 6 awards / 10 nominations = 0.60. Verified against the [site's 2015 data](https://www.scrapethissite.com/pages/ajax-javascript/?ajax=true&year=2015). |
+
+These tasks differ, so their duration and token counts are not a controlled before/after speedup. The laptop failure predates the low-reasoning change; the two later tasks passed with it. The controller still trusts a model's `finish(success=true)` and does not independently prove every claim. An empty but syntactically successful extraction can still mislead it; that remains the main accuracy risk.

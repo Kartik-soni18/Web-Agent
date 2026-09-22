@@ -20,6 +20,7 @@ class RunTrace:
     action: str | None = None
     action_payload: dict[str, object] = field(default_factory=dict)
     llm_duration_seconds: float = 0.0
+    model_attempts: int = 0
     execution_duration_seconds: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -65,7 +66,7 @@ class RunMetrics:
     def add_trace(self, trace: RunTrace) -> None:
         self.traces.append(trace)
         self.steps = len(self.traces)
-        self.llm_calls += 1
+        self.llm_calls += trace.model_attempts
         self.llm_duration_seconds += trace.llm_duration_seconds
         self.execution_duration_seconds += trace.execution_duration_seconds
         self.input_tokens += trace.input_tokens

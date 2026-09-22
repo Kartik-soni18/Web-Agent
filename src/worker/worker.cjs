@@ -219,6 +219,9 @@ exports.serve = async function () {
     });
     const console = new Console({ stdout: output, stderr: output, colorMode: false });
     try {
+      if (/^\s*\(\s*async\b/.test(code)) {
+        throw new Error('Write an async function body, not an unawaited async wrapper.');
+      }
       const run = new AsyncFunction(
         'playwright', 'browser', 'context', 'page', 'state', 'console', code,
       );
