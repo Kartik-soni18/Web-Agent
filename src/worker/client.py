@@ -30,7 +30,8 @@ def _worker_environment() -> dict[str, str]:
 
 
 class WorkerClient:
-    def __init__(self) -> None:
+    def __init__(self, cdp_url: str | None = None) -> None:
+        self.cdp_url = cdp_url
         self.process: asyncio.subprocess.Process | None = None
         self._temporary_directory: TemporaryDirectory[str] | None = None
         self._request_lock = asyncio.Lock()
@@ -127,7 +128,7 @@ class WorkerClient:
         self._stderr_task = asyncio.create_task(self._collect_stderr(process.stderr))
 
         try:
-            return await self._request({"type": "start"})
+            return await self._request({"type": "start", "cdp_url": self.cdp_url})
         except BaseException:
             await self._stop_process(terminate=True)
             raise

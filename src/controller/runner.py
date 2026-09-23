@@ -68,11 +68,14 @@ class Controller:
         self.state: AgentState | None = None
         self.metrics: RunMetrics | None = None
 
-    async def run(self, task: str) -> Finish:
+    async def run(self, task: str, *, page_ready: bool = False) -> Finish:
         if not task.strip():
             raise ValueError("task must not be empty")
 
-        state = AgentState(task=task, remaining_requirements=[task])
+        # A page_ready run starts on an already-open page, so the URL-picking starter is skipped.
+        state = AgentState(
+            task=task, remaining_requirements=[task], agent="mid" if page_ready else "starter"
+        )
         self.state = state
         worker = self.worker_factory()
         metrics = RunMetrics(
@@ -181,7 +184,7 @@ class Controller:
                 lambda state: END if state.result is not None else state.agent,
                 ["mid", "big", END],
             )
-        graph.add_edge(START, "starter")
+        graph.add_edge(START, state.agent)
         result = await graph.compile().ainvoke(vars(state))
         self.state = AgentState(**result)
         return result["result"]

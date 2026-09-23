@@ -6,8 +6,13 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "aiofiles>=25.1.0",
+    "browsergym-miniwob>=0.14.3",
     "dotenv>=0.9.9",
     "langgraph>=1.2.12",
     "openai>=1.0.0",
     "requests>=2.34.2",
 ]
+
+[tool.uv]
+# browsergym-core pins playwright==1.44, whose greenlet does not build on Python 3.14.
+override-dependencies = ["playwright>=1.55"]

@@ -241,10 +241,17 @@ exports.serve = async function () {
     if (message.type === 'start') {
       if (browser) throw new Error('worker is already started');
       try {
-        browser = await playwright.chromium.launch({ headless: true });
-        context = await browser.newContext();
-        page = await context.newPage();
-        await page.goto('about:blank');
+        if (message.cdp_url) {
+          // Attach to an externally owned browser (e.g. a BrowserGym task page); close() only disconnects.
+          browser = await playwright.chromium.connectOverCDP(message.cdp_url);
+          context = browser.contexts()[0];
+          page = context.pages().at(-1);
+        } else {
+          browser = await playwright.chromium.launch({ headless: false, slowMo:600 });
+          context = await browser.newContext();
+          page = await context.newPage();
+          await page.goto('about:blank');
+        }
         return { ok: true, type: 'started', observation: await observe() };
       } catch (error) {
         await close();
