@@ -18,7 +18,8 @@ SAFE_ENVIRONMENT_NAMES = {
     "TMPDIR",
     "WINDIR",
 }
-WORKER_RESPONSE_LIMIT = 1024 * 1024
+WORKER_RESPONSE_LIMIT = 8 * 1024 * 1024
+DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 
 def _worker_environment() -> dict[str, str]:
@@ -30,24 +31,13 @@ def _worker_environment() -> dict[str, str]:
 
 
 class WorkerClient:
-    def __init__(self, cdp_url: str | None = None) -> None:
+    def __init__(self, cdp_url: str = DEFAULT_CDP_URL) -> None:
         self.cdp_url = cdp_url
         self.process: asyncio.subprocess.Process | None = None
         self._temporary_directory: TemporaryDirectory[str] | None = None
         self._request_lock = asyncio.Lock()
         self._stderr_chunks: list[bytes] = []
         self._stderr_task: asyncio.Task[None] | None = None
-
-    async def __aenter__(self) -> "WorkerClient":
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback) -> None:
-        try:
-            await self.close()
-        except Exception:
-            if exc_type is None:
-                raise
 
     @property
     def stderr(self) -> str:
@@ -138,8 +128,10 @@ class WorkerClient:
             raise TypeError("code must be a string")
         return await self._request({"type": "execute", "code": code})
 
-    async def observe(self) -> dict[str, object]:
-        return await self._request({"type": "observe"})
+    async def screenshot(self) -> str | None:
+        response = await self._request({"type": "screenshot"})
+        screenshot = response.get("screenshot")
+        return screenshot if isinstance(screenshot, str) else None
 
     async def close(self) -> dict[str, object] | None:
         if self.process is None:

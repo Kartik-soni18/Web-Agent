@@ -150,8 +150,89 @@ function simplifyAccessibilityTree(tree, previousNavigation) {
   return { tree: { nodes: discardSeenNavigation(simplified) }, navigation };
 }
 
-function countNodes(nodes) {
-  return nodes.reduce((count, node) => count + 1 + countNodes(node.children ?? []), 0);
+// Runs in the page: geometry the accessibility tree lacks (canvases, shadow-DOM controls, overlays).
+// ponytail: scans every element and canvas pixel per observation; sample if huge pages get slow.
+function collectPageGeometry() {
+  const width = innerWidth;
+  const height = innerHeight;
+  const elements = [];
+  (function walk(root) {
+    for (const element of root.querySelectorAll('*')) {
+      elements.push(element);
+      if (element.shadowRoot) walk(element.shadowRoot);
+    }
+  })(document);
+  const box = element => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x), y: Math.round(rect.y),
+      width: Math.round(rect.width), height: Math.round(rect.height),
+    };
+  };
+  const visible = element => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
+      && rect.top < height && rect.left < width && getComputedStyle(element).visibility !== 'hidden';
+  };
+  function ink(canvas) {
+    // Copy instead of calling getContext on the page canvas, which could claim its context type.
+    try {
+      const copy = document.createElement('canvas');
+      copy.width = canvas.width;
+      copy.height = canvas.height;
+      const context = copy.getContext('2d', { willReadFrequently: true });
+      context.drawImage(canvas, 0, 0);
+      const data = context.getImageData(0, 0, copy.width, copy.height).data;
+      let pixels = 0, left = copy.width, top = copy.height, right = -1, bottom = -1;
+      for (let index = 0; index < data.length; index += 4) {
+        if (data[index] === data[0] && data[index + 1] === data[1]
+          && data[index + 2] === data[2] && data[index + 3] === data[3]) continue;
+        const x = (index / 4) % copy.width;
+        const y = Math.floor(index / 4 / copy.width);
+        pixels += 1;
+        left = Math.min(left, x); top = Math.min(top, y);
+        right = Math.max(right, x); bottom = Math.max(bottom, y);
+      }
+      return pixels ? { pixels, bbox: [left, top, right, bottom] } : { pixels };
+    } catch {
+      return undefined;
+    }
+  }
+
+  const surfaces = elements
+    .filter(element => ['canvas', 'svg'].includes(element.localName) && visible(element))
+    .filter(element => element.getBoundingClientRect().width >= 100
+      && element.getBoundingClientRect().height >= 100)
+    .slice(0, 5)
+    .map(element => element.localName === 'canvas'
+      ? { tag: 'canvas', ...box(element), buffer: [element.width, element.height], ink: ink(element) }
+      : { tag: 'svg', ...box(element) });
+  const titledControls = [...new Set(elements
+    .filter(element => element.localName.includes('-') && visible(element))
+    .map(element => element.getAttribute('title') || element.getAttribute('aria-label'))
+    .filter(Boolean))].slice(0, 40);
+  const overlayElements = [];
+  for (const element of elements) {
+    if (overlayElements.length >= 5) break;
+    const style = getComputedStyle(element);
+    if (!['fixed', 'sticky'].includes(style.position) || !visible(element)) continue;
+    const rect = element.getBoundingClientRect();
+    const zIndex = Number.parseInt(style.zIndex, 10) || 0;
+    if (rect.width * rect.height < 0.15 * width * height && zIndex < 1000) continue;
+    if (overlayElements.some(overlay => overlay.contains(element))) continue;
+    overlayElements.push(element);
+  }
+  const overlays = overlayElements.map(element => ({
+    ...box(element),
+    z: Number.parseInt(getComputedStyle(element).zIndex, 10) || 0,
+    text: (element.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+  }));
+  const captchaPattern = /recaptcha|hcaptcha|turnstile|challenges\.cloudflare/i;
+  const captcha = elements.some(element => visible(element) && captchaPattern.test(
+    `${element.localName === 'iframe' ? element.src : ''} ${element.getAttribute('class') ?? ''}`));
+  return {
+    viewport: [width, height], surfaces, titled_controls: titledControls, overlays, captcha,
+  };
 }
 
 exports.serve = async function () {
@@ -166,7 +247,11 @@ exports.serve = async function () {
   const state = {};
 
   async function close() {
-    closing ??= browser ? browser.close() : Promise.resolve();
+    // Close only the agent's tab, then disconnect; the attached Chrome keeps running.
+    closing ??= (async () => {
+      await page?.close().catch(() => {});
+      await browser?.close();
+    })();
     await closing;
   }
 
@@ -198,8 +283,7 @@ exports.serve = async function () {
       url: page.url(),
       title,
       accessibility_tree: simplified.tree,
-      raw_node_count: tree.nodes.length,
-      kept_node_count: countNodes(simplified.tree.nodes),
+      page_geometry: await page.evaluate(collectPageGeometry).catch(() => ({})),
     };
   }
 
@@ -209,7 +293,6 @@ exports.serve = async function () {
       stdout: '',
       result: null,
       traceback: null,
-      timed_out: false,
     };
     const output = new Writable({
       write(chunk, encoding, callback) {
@@ -241,17 +324,9 @@ exports.serve = async function () {
     if (message.type === 'start') {
       if (browser) throw new Error('worker is already started');
       try {
-        if (message.cdp_url) {
-          // Attach to an externally owned browser (e.g. a BrowserGym task page); close() only disconnects.
-          browser = await playwright.chromium.connectOverCDP(message.cdp_url);
-          context = browser.contexts()[0];
-          page = context.pages().at(-1);
-        } else {
-          browser = await playwright.chromium.launch({ headless: false, slowMo:600 });
-          context = await browser.newContext();
-          page = await context.newPage();
-          await page.goto('about:blank');
-        }
+        browser = await playwright.chromium.connectOverCDP(message.cdp_url);
+        context = browser.contexts()[0];
+        page = await context.newPage();
         return { ok: true, type: 'started', observation: await observe() };
       } catch (error) {
         await close();
@@ -268,8 +343,11 @@ exports.serve = async function () {
       const execution = await execute(message.code);
       return { ok: true, type: 'executed', execution, observation: await observe() };
     }
-    if (message.type === 'observe') {
-      return { ok: true, type: 'observed', observation: await observe() };
+    if (message.type === 'screenshot') {
+      // CSS-pixel viewport capture, so image coordinates equal page.mouse coordinates.
+      const image = await page.screenshot({ type: 'jpeg', quality: 60, scale: 'css', timeout: 10000 })
+        .catch(() => null);
+      return { ok: true, type: 'screenshot', screenshot: image?.toString('base64') ?? null };
     }
     throw new Error(`unknown message type: ${message.type}`);
   }

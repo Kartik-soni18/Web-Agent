@@ -68,14 +68,11 @@ class Controller:
         self.state: AgentState | None = None
         self.metrics: RunMetrics | None = None
 
-    async def run(self, task: str, *, page_ready: bool = False) -> Finish:
+    async def run(self, task: str) -> Finish:
         if not task.strip():
             raise ValueError("task must not be empty")
 
-        # A page_ready run starts on an already-open page, so the URL-picking starter is skipped.
-        state = AgentState(
-            task=task, remaining_requirements=[task], agent="mid" if page_ready else "starter"
-        )
+        state = AgentState(task=task, remaining_requirements=[task])
         self.state = state
         worker = self.worker_factory()
         metrics = RunMetrics(
@@ -147,6 +144,10 @@ class Controller:
                 return vars(state)
             state.step += 1
             trace = RunTrace(step=state.step, agent=state.agent)
+            state.screenshot = (
+                await asyncio.wait_for(worker.screenshot(), timeout=WORKER_CALL_SECONDS)
+                if state.agent == "big" else None
+            )
             action = await self._next_action(state, trace, metrics, deadline)
 
             if isinstance(action, ExecuteBrowserCode):
@@ -169,10 +170,15 @@ class Controller:
                 metrics.add_trace(trace)
                 raise TypeError(f"unsupported controller action: {type(action).__name__}")
 
+            # Canvas-like surfaces need eyes; big is the vision model.
+            # ponytail: big is sticky; drop back to mid after clean steps if screenshot cost matters.
+            needs_vision = bool(
+                state.observation and state.observation.page_geometry.get("surfaces")
+            )
             if state.agent == "starter":
-                state.agent = "mid"
+                state.agent = "big" if needs_vision else "mid"
                 state.result = None
-            elif isinstance(action, ExecuteBrowserCode) and not trace.success:
+            elif isinstance(action, ExecuteBrowserCode) and (not trace.success or needs_vision):
                 state.agent = "big"
             return vars(state)
 
@@ -272,6 +278,7 @@ class Controller:
             and previous.url == observation.url
             and previous.title == observation.title
             and previous.accessibility_tree == observation.accessibility_tree
+            and previous.page_geometry == observation.page_geometry
             else 0
         )
         state.recent_actions = [
@@ -279,9 +286,6 @@ class Controller:
             f"{action.intent}: code {'ran' if execution.success else 'failed'}; "
             f"now at {observation.url}",
         ]
-        state.consecutive_failures = (
-            0 if execution.success else state.consecutive_failures + 1
-        )
 
         trace.success = execution.success
         trace.execution_result = asdict(execution)

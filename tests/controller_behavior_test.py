@@ -62,7 +62,7 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
     async def test_failed_code_does_not_commit_claimed_memory(self):
         observation = BrowserObservation(
             url="https://example.com", title="Example",
-            accessibility_tree={"nodes": []}, raw_node_count=0, kept_node_count=0,
+            accessibility_tree={"nodes": []},
         )
 
         class Worker:
@@ -74,6 +74,9 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
                     "execution": {"success": self.calls == 1, "traceback": "failed" if self.calls == 2 else None},
                     "observation": asdict(observation),
                 }
+
+            async def screenshot(self):
+                return None
 
         starter = ScriptedActionProvider([ExecuteBrowserCode("navigate", "open page")])
         mid = ScriptedActionProvider([

@@ -56,7 +56,7 @@ class FocusedObservationTest(unittest.TestCase):
             agent="mid",
             observation=BrowserObservation(
                 url="https://example.com", title="Example",
-                accessibility_tree={"nodes": []}, raw_node_count=0, kept_node_count=0,
+                accessibility_tree={"nodes": []},
             ),
             last_execution=ExecutionResult(
                 success=True, result="r" * 5_000, stdout="s" * 5_000,

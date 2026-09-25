@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -7,5 +7,4 @@ class BrowserObservation:
     url: str
     title: str
     accessibility_tree: dict[str, list[dict[str, Any]]]
-    raw_node_count: int
-    kept_node_count: int
+    page_geometry: dict[str, Any] = field(default_factory=dict)

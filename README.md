@@ -10,19 +10,18 @@ before sending observations to Python.
 
 The project currently:
 
-- launches a visible Chromium browser with a small delay between Playwright actions;
+- attaches over CDP to a Chrome you start (default `http://127.0.0.1:9222`) and works in a new tab;
 - observes the current URL, title, and a pruned accessibility tree;
 - supports three model actions: execute browser code, ask the user, and finish;
 - rebuilds a bounded context from the current task, memory, execution result, and page;
 - keeps the OpenRouter API key out of the worker environment;
-- uses the hardcoded model and example task configured in `main.py`.
+- uses the hardcoded models in `main.py`; tasks come from the command line.
 
 ## Improvements
 
 - Run generated code inside a real OS or container sandbox.
 - Add execution timeouts, step limits, failure limits, and output-size limits.
 - Improve observations with screenshots, stronger DOM data, and multi-tab tracking.
-- Make the task and model configurable from the command line again.
 - Record token usage, cost, latency, steps, and validated task success.
 - Add broader automated and browser integration tests.
 
@@ -34,14 +33,16 @@ Install Node.js 24 or newer, and create a `.env` file containing:
 OPENROUTER_API_KEY=your_key_here
 ```
 
-Install the project and Chromium, then run the agent:
+Install the project, start Chrome with a dedicated agent profile, then run the agent:
 
 ```bash
 uv sync
 npm ci
-npx playwright install chromium
-uv run python main.py --allow-unsafe-exec
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-agent"
+uv run python main.py --allow-unsafe-exec "your task"
 ```
+
+Use `--cdp URL` to attach to a different browser.
 
 > [!WARNING]
 > The model generates and executes arbitrary JavaScript code. It may execute unwanted
