@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 
 from src.controller import Controller
-from src.openrouter_adapter import OpenRouterActionProvider
+from src.llm_adapter import OpenRouterActionProvider
 from src.worker.client import DEFAULT_CDP_URL, WorkerClient
 
 

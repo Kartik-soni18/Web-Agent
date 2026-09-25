@@ -11,7 +11,7 @@ from ..models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 from ..models.execution import ExecutionResult
 from ..models.observations import BrowserObservation
 from ..models.state import AgentState
-from ..openrouter_adapter import ModelActionError
+from ..llm_adapter import ModelActionError
 from ..worker.client import WorkerClient
 from .api import ACTION_NAMES, Action, ActionProvider, AskUserCallback
 from .context import build_model_context

@@ -6,3 +6,5 @@ PLAN.MD
 test_*
 .env
 node_modules/
+agent-plan.md
+WEB_AGENT_ARCHITECTURE_AND_PROBLEMS.md

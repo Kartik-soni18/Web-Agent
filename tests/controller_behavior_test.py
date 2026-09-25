@@ -11,7 +11,7 @@ from src.metrics import RunMetrics, RunTrace
 from src.models.actions import ExecuteBrowserCode, Finish, Memory
 from src.models.observations import BrowserObservation
 from src.models.state import AgentState
-from src.openrouter_adapter import ModelActionError, _parse_starter_action
+from src.llm_adapter import ModelActionError, _parse_starter_action
 
 
 class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
