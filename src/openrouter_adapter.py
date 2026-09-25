@@ -9,7 +9,7 @@ from .models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-STARTER_SYSTEM_PROMPT = """Choose the first page for the browser task, then hand off.
+STARTER_SYSTEM_PROMPT = """Choose the first page using duck duck go search  for the browser task, then hand off.
 Call `act` exactly once with action `execute_browser_code`, a full http(s) `url`,
 and a short `intent`. Use a URL from the task when given; otherwise choose a
 search URL for the query. Do not write JavaScript or interact with page controls.

@@ -17,7 +17,7 @@ MODELS = {
 }
 CDP_PORT = 9222
 TASKS = [
-    "On books.toscrape.com, find a book priced over £100."
+    "tell me a determinstic way to identify dynamo works with which inference engine and version "
 ]
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
         "--miniwob",
         nargs="+",
         metavar="TASK_ID",
-        help="run BrowserGym MiniWoB tasks (e.g. miniwob.click-button) instead of TASKS; needs MINIWOB_URL",
+        help="run BrowserGym MiniWoB tasks (e.g. miniwob.click-button, or all) instead of TASKS; needs MINIWOB_URL",
     )
     parser.add_argument("--seed", type=int, default=0, help="MiniWoB task seed")
     return parser
@@ -42,6 +42,8 @@ async def _run_miniwob(providers, task_ids: list[str], seed: int) -> int:
     from playwright.sync_api import sync_playwright
 
     tasks = {cls.get_task_id(): cls for cls in ALL_MINIWOB_TASKS}
+    if task_ids == ["all"]:
+        task_ids = list(tasks)
     unknown = [task_id for task_id in task_ids if task_id not in tasks]
     if unknown:
         raise ValueError(f"unknown MiniWoB tasks: {unknown}")
@@ -54,7 +56,7 @@ async def _run_miniwob(providers, task_ids: list[str], seed: int) -> int:
     def launch():
         pw = sync_playwright().start()
         context = pw.chromium.launch_persistent_context(
-            "", headless=False, args=[f"--remote-debugging-port={CDP_PORT}"]
+            "", headless=False , slow_mo=1000, args=[f"--remote-debugging-port={CDP_PORT}"]
         )
         return pw, context
 
