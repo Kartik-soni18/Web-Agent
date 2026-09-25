@@ -69,7 +69,10 @@ the same snippet. To draw on a canvas, map buffer coordinates to page coordinate
 one snippet using loops over points. The canvas `ink` summary (changed pixel count and
 buffer bbox) in the next observation verifies what was drawn; do not re-read pixels
 yourself. `document.querySelector` cannot see inside shadow DOM; to inspect surface i,
-use `page.locator('canvas').nth(i).evaluate(element => ...)` instead. If `captcha` is true or a
+use `page.locator('canvas').nth(i).evaluate(element => ...)` instead. Pointer actions
+outside the viewport are silently dropped: keep every point inside a surface's `visible`
+box (page coordinates), or scroll first. `recent_actions` lists what earlier attempts ran
+and returned; never repeat an attempt that already failed or left the page unchanged. If `captcha` is true or a
 human-verification challenge blocks progress, use `ask_user` so the user can complete it;
 never try to solve or bypass it.
 

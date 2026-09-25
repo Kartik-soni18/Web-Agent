@@ -92,8 +92,8 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("unverified claim", big.contexts[0]["memory"]["facts"])
         self.assertEqual(big.contexts[0]["memory"]["remaining"], ["task"])
-        self.assertEqual(big.contexts[0]["recent_actions"][-1],
-                         "try action: code failed; now at https://example.com")
+        self.assertTrue(big.contexts[0]["recent_actions"][-1].startswith(
+            "try action: code failed; now at https://example.com; page unchanged"))
         self.assertIsNotNone(big.contexts[0]["stalled_page"])
 
     async def test_worker_timeout_aborts_stuck_worker(self):

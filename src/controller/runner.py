@@ -152,7 +152,10 @@ class Controller:
 
             if isinstance(action, ExecuteBrowserCode):
                 await self._execute_browser_code(action, state, worker, trace, metrics, deadline)
-                if trace.success and state.agent != "starter":
+                # Code that ran but left the page unchanged twice in a row is a silent no-op,
+                # not progress: keep its claimed facts out of memory and escalate.
+                made_progress = trace.success and state.unchanged_observations < 2
+                if made_progress and state.agent != "starter":
                     _apply_memory(action.memory, state)
             elif isinstance(action, AskUser):
                 await self._ask_for_clarification(action, state)
@@ -178,7 +181,7 @@ class Controller:
             if state.agent == "starter":
                 state.agent = "big" if needs_vision else "mid"
                 state.result = None
-            elif isinstance(action, ExecuteBrowserCode) and (not trace.success or needs_vision):
+            elif isinstance(action, ExecuteBrowserCode) and (not made_progress or needs_vision):
                 state.agent = "big"
             return vars(state)
 
@@ -281,10 +284,15 @@ class Controller:
             and previous.page_geometry == observation.page_geometry
             else 0
         )
+        # Keep what each recent attempt ran and returned, so a repeated dead end is visible.
+        outcome = execution.traceback or execution.result or execution.stdout or ""
         state.recent_actions = [
-            *state.recent_actions[-2:],
+            *state.recent_actions[-4:],
             f"{action.intent}: code {'ran' if execution.success else 'failed'}; "
-            f"now at {observation.url}",
+            f"now at {observation.url}"
+            + ("; page unchanged" if state.unchanged_observations else "")
+            + f"\n  code: {' '.join(action.code.split())[:200]}"
+            + f"\n  returned: {' '.join(outcome.split())[:200]}",
         ]
 
         trace.success = execution.success

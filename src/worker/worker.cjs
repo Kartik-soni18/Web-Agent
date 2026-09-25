@@ -162,6 +162,13 @@ function collectPageGeometry() {
       if (element.shadowRoot) walk(element.shadowRoot);
     }
   })(document);
+  // Pointer events outside the viewport are dropped, so report the part that can be targeted.
+  const clipped = element => {
+    const rect = element.getBoundingClientRect();
+    if (rect.left >= 0 && rect.top >= 0 && rect.right <= width && rect.bottom <= height) return {};
+    return { visible: [Math.round(Math.max(0, rect.left)), Math.round(Math.max(0, rect.top)),
+      Math.round(Math.min(width, rect.right)), Math.round(Math.min(height, rect.bottom))] };
+  };
   const box = element => {
     const rect = element.getBoundingClientRect();
     return {
@@ -205,8 +212,9 @@ function collectPageGeometry() {
       && element.getBoundingClientRect().height >= 100)
     .slice(0, 5)
     .map(element => element.localName === 'canvas'
-      ? { tag: 'canvas', ...box(element), buffer: [element.width, element.height], ink: ink(element) }
-      : { tag: 'svg', ...box(element) });
+      ? { tag: 'canvas', ...box(element), ...clipped(element),
+        buffer: [element.width, element.height], ink: ink(element) }
+      : { tag: 'svg', ...box(element), ...clipped(element) });
   const titledControls = [...new Set(elements
     .filter(element => element.localName.includes('-') && visible(element))
     .map(element => element.getAttribute('title') || element.getAttribute('aria-label'))
@@ -327,6 +335,9 @@ exports.serve = async function () {
         browser = await playwright.chromium.connectOverCDP(message.cdp_url);
         context = browser.contexts()[0];
         page = await context.newPage();
+        // A missed locator should fail fast so the agent can react; navigations keep 30s.
+        page.setDefaultTimeout(5000);
+        page.setDefaultNavigationTimeout(30000);
         return { ok: true, type: 'started', observation: await observe() };
       } catch (error) {
         await close();

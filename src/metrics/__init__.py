@@ -109,7 +109,16 @@ class RunMetrics:
 
     def save(self, path: Path | None = None) -> None:
         if path is None:
-            path = METRICS_DIR / f"{self.run_id}.json"
+            path = getattr(self, "_path", None)
+        if path is None:
+            # Local start time as DDMMYYYYHHMM; later runs in the same minute get -2, -3, ...
+            stamp = datetime.fromisoformat(self.started_at).astimezone().strftime("%d%m%Y%H%M")
+            path = METRICS_DIR / f"{stamp}.json"
+            suffix = 2
+            while path.exists():
+                path = METRICS_DIR / f"{stamp}-{suffix}.json"
+                suffix += 1
+            self._path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = path.with_suffix(".tmp")
         temporary_path.write_text(
