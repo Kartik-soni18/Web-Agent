@@ -1,4 +1,3 @@
-"""Render simplified accessibility trees for the model context."""
 
 import json
 from typing import Any
