@@ -3,14 +3,13 @@ import json
 import unittest
 from dataclasses import asdict
 from time import perf_counter
-from unittest.mock import patch
 
 from src.controller import Controller, ScriptedActionProvider
 from src.controller.context import build_model_context
 from src.metrics import RunMetrics, RunTrace
 from src.models.actions import ExecuteBrowserCode, Finish, Memory
 from src.models.observations import BrowserObservation
-from src.models.state import AgentState
+from src.models.state import AgentState, Limits
 from src.llm_adapter import ModelActionError, _parse_starter_action
 
 
@@ -33,6 +32,7 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_bad_model_action_is_retried_once_and_usage_is_counted(self):
         class Provider:
+            role = "worker"
             calls = 0
             last_usage = {}
 
@@ -78,13 +78,15 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
             async def screenshot(self):
                 return None
 
-        starter = ScriptedActionProvider([ExecuteBrowserCode("navigate", "open page")])
+        starter = ScriptedActionProvider([ExecuteBrowserCode("navigate", "open page")], role="starter")
         mid = ScriptedActionProvider([
             ExecuteBrowserCode("fail", "try action", Memory(facts=["unverified claim"], remaining=[]))
         ])
-        big = ScriptedActionProvider([Finish(answer="blocked", success=False)])
+        big = ScriptedActionProvider([Finish(answer="blocked", success=False)], screenshots=True)
         controller = Controller({"starter": starter, "mid": mid, "big": big})
-        state = AgentState(task="task", observation=observation, remaining_requirements=["task"])
+        state = AgentState(
+            task="task", agent="starter", observation=observation, remaining_requirements=["task"]
+        )
         metrics = RunMetrics(task="task", models={})
         metrics.save = lambda: None
 
@@ -107,18 +109,17 @@ class ControllerBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 self.aborted = True
 
         worker = Worker()
-        controller = Controller({})
+        controller = Controller({}, limits=Limits(worker_call_seconds=0.01))
         metrics = RunMetrics(task="task", models={})
         metrics.save = lambda: None
         trace = RunTrace(step=1, agent="mid")
 
-        with patch("src.controller.runner.WORKER_CALL_SECONDS", 0.01):
-            with self.assertRaises(TimeoutError):
-                await controller._execute_browser_code(
-                    ExecuteBrowserCode("while(true){}", "stuck"),
-                    AgentState(task="task", agent="mid"), worker, trace,
-                    metrics, perf_counter() + 5,
-                )
+        with self.assertRaises(TimeoutError):
+            await controller._execute_browser_code(
+                ExecuteBrowserCode("while(true){}", "stuck"),
+                AgentState(task="task", agent="mid"), worker, trace,
+                metrics, perf_counter() + 5,
+            )
 
         self.assertTrue(worker.aborted)
         self.assertEqual(trace.error_type, "worker_error")

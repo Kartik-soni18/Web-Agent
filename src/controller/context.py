@@ -1,19 +1,20 @@
 from dataclasses import asdict
 
 from ..accessibility import render_accessibility_tree
-from ..models.state import AgentState
+from ..models.state import AgentState, Limits
 from .api import ModelContext
 
 
-def build_model_context(state: AgentState) -> ModelContext:
+def build_model_context(state: AgentState, limits: Limits = Limits()) -> ModelContext:
     """Build a compact view of the state needed for the next model action."""
-
-    if state.agent == "starter":
-        return {"original_task": state.task}
 
     execution = asdict(state.last_execution) if state.last_execution else None
     if execution:
-        for key, limit in (("result", 3_000), ("stdout", 3_000), ("traceback", 2_000)):
+        for key, limit in (
+            ("result", limits.result_chars),
+            ("stdout", limits.stdout_chars),
+            ("traceback", limits.traceback_chars),
+        ):
             value = execution[key]
             if isinstance(value, str) and len(value) > limit:
                 execution[key] = value[:limit] + "\n[Truncated; request a narrower result.]"
@@ -30,7 +31,7 @@ def build_model_context(state: AgentState) -> ModelContext:
         "stalled_page": (
             "The URL, title, and page outline have not changed after multiple actions. "
             "Use a different source or report the block instead of waiting again."
-            if state.unchanged_observations >= 2
+            if state.unchanged_observations >= limits.stall_after
             else None
         ),
         "captcha_present": (
@@ -50,7 +51,7 @@ def build_model_context(state: AgentState) -> ModelContext:
                     "url": state.observation.url,
                     "title": state.observation.title,
                     "page_outline": render_accessibility_tree(
-                        state.observation.accessibility_tree
+                        state.observation.accessibility_tree, limits.outline_chars
                     ),
                     "page_geometry": {
                         key: value

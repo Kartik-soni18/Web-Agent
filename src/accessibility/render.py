@@ -2,12 +2,15 @@
 import json
 from typing import Any
 
+from ..models.state import Limits
 
-OUTLINE_LIMIT = 10_000
+
 TRUNCATED_OUTLINE = "[Page outline truncated; inspect a specific locator for more detail.]"
 
 
-def render_accessibility_tree(tree: dict[str, list[dict[str, Any]]]) -> str:
+def render_accessibility_tree(
+    tree: dict[str, list[dict[str, Any]]], limit: int = Limits.outline_chars
+) -> str:
     lines = []
 
     def find_role(nodes: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
@@ -58,7 +61,7 @@ def render_accessibility_tree(tree: dict[str, list[dict[str, Any]]]) -> str:
         visit(node, 0, skip_focus=True)
 
     outline = "\n".join(lines)
-    if len(outline) > OUTLINE_LIMIT:
-        outline = outline[: OUTLINE_LIMIT - len(TRUNCATED_OUTLINE) - 1].rsplit("\n", 1)[0]
+    if len(outline) > limit:
+        outline = outline[: limit - len(TRUNCATED_OUTLINE) - 1].rsplit("\n", 1)[0]
         return f"{outline}\n{TRUNCATED_OUTLINE}"
     return outline

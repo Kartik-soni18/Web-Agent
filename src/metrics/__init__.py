@@ -12,6 +12,24 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _without_screenshots(request: dict[str, object] | None) -> dict[str, object] | None:
+    if not request:
+        return request
+    messages = [
+        {
+            **message,
+            "content": [
+                {"type": "image_url", "image_url": "[screenshot omitted]"}
+                if part.get("type") == "image_url" else part
+                for part in message["content"]
+            ],
+        }
+        if isinstance(message.get("content"), list) else message
+        for message in request.get("messages", [])
+    ]
+    return {**request, "messages": messages}
+
+
 @dataclass
 class RunTrace:
     step: int
@@ -107,6 +125,61 @@ class RunMetrics:
             self.error_type = type(error).__name__
             self.error_message = str(error)
 
+    def _report(self) -> dict[str, object]:
+        """Functional story first, non-functional numbers next, raw LLM traffic last."""
+
+        def step_view(trace: RunTrace) -> dict[str, object]:
+            payload = trace.action_payload
+            execution = trace.execution_result or {}
+            view = {
+                "step": trace.step,
+                "agent": trace.agent,
+                "action": trace.action,
+                "intent": payload.get("intent"),
+                "code": payload.get("code"),
+                "question": payload.get("question"),
+                "answer": payload.get("answer"),
+                "returned": execution.get("result") or execution.get("stdout") or None,
+                "ok": trace.success,
+                "error": trace.error_message,
+                "memory": payload.get("memory"),
+            }
+            return {key: value for key, value in view.items() if value not in (None, "")}
+
+        run = asdict(self)
+        traces = run.pop("traces")
+        summary_keys = ("task", "success", "final_answer", "error_type", "error_message")
+        return {
+            **{key: run.pop(key) for key in summary_keys},
+            "steps": [step_view(trace) for trace in self.traces],
+            "performance": {
+                **run,
+                "per_step": [
+                    {
+                        "step": trace["step"],
+                        "agent": trace["agent"],
+                        "started_at": trace["started_at"],
+                        "model": trace["response_model"],
+                        "model_attempts": trace["model_attempts"],
+                        "llm_seconds": round(trace["llm_duration_seconds"], 2),
+                        "execution_seconds": round(trace["execution_duration_seconds"], 2),
+                        "input_tokens": trace["input_tokens"],
+                        "output_tokens": trace["output_tokens"],
+                        "cost_usd": trace["cost_usd"],
+                    }
+                    for trace in traces
+                ],
+            },
+            "raw_llm": [
+                {
+                    "step": trace["step"],
+                    "request": _without_screenshots(trace["llm_request"]),
+                    "response": trace["llm_response"],
+                }
+                for trace in traces
+            ],
+        }
+
     def save(self, path: Path | None = None) -> None:
         if path is None:
             path = getattr(self, "_path", None)
@@ -122,7 +195,7 @@ class RunMetrics:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = path.with_suffix(".tmp")
         temporary_path.write_text(
-            json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n",
+            json.dumps(self._report(), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
         temporary_path.replace(path)

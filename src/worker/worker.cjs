@@ -250,6 +250,7 @@ exports.serve = async function () {
   let browser;
   let context;
   let page;
+  let screenshotTimeout;
   let closing;
   let previousNavigation = new Set();
   const state = {};
@@ -335,9 +336,9 @@ exports.serve = async function () {
         browser = await playwright.chromium.connectOverCDP(message.cdp_url);
         context = browser.contexts()[0];
         page = await context.newPage();
-        // A missed locator should fail fast so the agent can react; navigations keep 30s.
-        page.setDefaultTimeout(5000);
-        page.setDefaultNavigationTimeout(30000);
+        screenshotTimeout = message.screenshot_timeout_ms;
+        page.setDefaultTimeout(message.action_timeout_ms);
+        page.setDefaultNavigationTimeout(message.navigation_timeout_ms);
         return { ok: true, type: 'started', observation: await observe() };
       } catch (error) {
         await close();
@@ -356,7 +357,7 @@ exports.serve = async function () {
     }
     if (message.type === 'screenshot') {
       // CSS-pixel viewport capture, so image coordinates equal page.mouse coordinates.
-      const image = await page.screenshot({ type: 'jpeg', quality: 60, scale: 'css', timeout: 10000 })
+      const image = await page.screenshot({ type: 'jpeg', quality: 60, scale: 'css', timeout: screenshotTimeout })
         .catch(() => null);
       return { ok: true, type: 'screenshot', screenshot: image?.toString('base64') ?? null };
     }

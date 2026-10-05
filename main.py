@@ -6,14 +6,20 @@ from dotenv import load_dotenv
 
 from src.controller import Controller
 from src.llm_adapter import OpenRouterActionProvider
+from src.models.state import Limits
 from src.worker.client import DEFAULT_CDP_URL, WorkerClient
 
 
-MODELS = {
-    "starter": "openai/gpt-oss-20b",
-    "mid": "z-ai/glm-5.3-flash",
-    "big": "z-ai/glm-5.3-flash",
+# Tiers in escalation order. The first entry starts the task. role "starter" only picks the
+# first URL; role "worker" runs the act loop. A worker escalates to the next entry when its
+# code fails or stalls, or to the next entry with screenshots when the page needs vision.
+TIERS = {
+    "starter": dict(model="openai/gpt-oss-20b", role="starter", screenshots=False,
+                    max_tokens=2_048, effort=None, sort="latency"),
+    "big": dict(model="z-ai/glm-5.3-flash", role="worker", screenshots=True,
+                max_tokens=4_096, effort="low", sort="throughput"),
 }
+LIMITS = Limits()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -32,10 +38,11 @@ def _parser() -> argparse.ArgumentParser:
 
 async def _run(api_key: str, tasks: list[str], cdp_url: str) -> int:
     providers = {
-        agent: OpenRouterActionProvider(api_key=api_key, model=model, starter=agent == "starter")
-        for agent, model in MODELS.items()
+        name: OpenRouterActionProvider(api_key=api_key, **tier) for name, tier in TIERS.items()
     }
-    controller = Controller(providers, worker_factory=lambda: WorkerClient(cdp_url))
+    controller = Controller(
+        providers, limits=LIMITS, worker_factory=lambda: WorkerClient(cdp_url, LIMITS)
+    )
     exit_code = 0
     try:
         for index, task in enumerate(tasks, start=1):

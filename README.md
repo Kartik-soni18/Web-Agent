@@ -1,5 +1,13 @@
 # Web Agent
 
+## Roadmap
+
+- [x] Initial scaffolding and environment
+- [x] Working prototype
+- [ ] **Improving accuracy** (current)
+- [ ] Making parallel web calls
+- [ ] Improving cost and speed
+
 Web Agent is an experimental AI browser agent for automating everyday web-based
 tasks. It asks a model to write async Playwright JavaScript and executes that
 code in a Node.js child worker. The browser and a shared `state` object stay

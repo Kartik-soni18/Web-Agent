@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ..models.state import Limits
+
 
 SAFE_ENVIRONMENT_NAMES = {
     "HOME",
@@ -18,7 +20,6 @@ SAFE_ENVIRONMENT_NAMES = {
     "TMPDIR",
     "WINDIR",
 }
-WORKER_RESPONSE_LIMIT = 8 * 1024 * 1024
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 
@@ -31,8 +32,9 @@ def _worker_environment() -> dict[str, str]:
 
 
 class WorkerClient:
-    def __init__(self, cdp_url: str = DEFAULT_CDP_URL) -> None:
+    def __init__(self, cdp_url: str = DEFAULT_CDP_URL, limits: Limits = Limits()) -> None:
         self.cdp_url = cdp_url
+        self.limits = limits
         self.process: asyncio.subprocess.Process | None = None
         self._temporary_directory: TemporaryDirectory[str] | None = None
         self._request_lock = asyncio.Lock()
@@ -103,7 +105,7 @@ class WorkerClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                limit=WORKER_RESPONSE_LIMIT,
+                limit=self.limits.worker_response_bytes,
                 cwd=temporary_directory.name,
                 env=_worker_environment(),
             )
@@ -118,7 +120,13 @@ class WorkerClient:
         self._stderr_task = asyncio.create_task(self._collect_stderr(process.stderr))
 
         try:
-            return await self._request({"type": "start", "cdp_url": self.cdp_url})
+            return await self._request({
+                "type": "start",
+                "cdp_url": self.cdp_url,
+                "action_timeout_ms": self.limits.action_timeout_ms,
+                "navigation_timeout_ms": self.limits.navigation_timeout_ms,
+                "screenshot_timeout_ms": self.limits.screenshot_timeout_ms,
+            })
         except BaseException:
             await self._stop_process(terminate=True)
             raise

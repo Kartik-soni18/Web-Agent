@@ -17,13 +17,20 @@ ACTION_NAMES = {
 
 
 class ActionProvider(Protocol):
+    role: str  # "starter" picks the first URL only; "worker" runs the full act loop
+    screenshots: bool
+
     async def next_action(self, context: ModelContext) -> Action: ...
 
 
 class ScriptedActionProvider:
     """A deterministic model substitute for exercising the controller loop."""
 
-    def __init__(self, actions: Iterable[Action]) -> None:
+    def __init__(
+        self, actions: Iterable[Action], *, role: str = "worker", screenshots: bool = False
+    ) -> None:
+        self.role = role
+        self.screenshots = screenshots
         self._actions = deque(actions)
         self.contexts: list[ModelContext] = []
 

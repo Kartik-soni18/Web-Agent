@@ -13,15 +13,22 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class OpenRouterActionProvider:
-    def __init__(self, *, api_key: str, model: str, starter: bool = False) -> None:
+    def __init__(
+        self, *, api_key: str, model: str, role: str, screenshots: bool,
+        max_tokens: int, effort: str | None, sort: str,
+    ) -> None:
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY is required")
         if not model:
             raise ValueError("an OpenRouter model is required")
         self.model = model
-        self.starter = starter
+        self.role = role
+        self.screenshots = screenshots
+        self.max_tokens = max_tokens
+        self.effort = effort
+        self.sort = sort
         self.tools = deepcopy(TOOLS)
-        if starter:
+        if role == "starter":
             self.tools[0]["function"]["description"] = "Choose the first page URL only."
             parameters = self.tools[0]["function"]["parameters"]
             parameters["properties"] = {
@@ -43,7 +50,6 @@ class OpenRouterActionProvider:
     ) -> ExecuteBrowserCode | AskUser | Finish:
         context = dict(context)
         screenshot = context.pop("screenshot", None)
-        # ponytail: screenshots are stored in metrics traces via llm_request; strip them if traces grow too large.
         user_content: str | list[dict[str, object]] = json.dumps(context)
         if screenshot:
             user_content = [
@@ -60,18 +66,18 @@ class OpenRouterActionProvider:
             "messages": [
                 {
                     "role": "system",
-                    "content": STARTER_SYSTEM_PROMPT if self.starter else SYSTEM_PROMPT,
+                    "content": STARTER_SYSTEM_PROMPT if self.role == "starter" else SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": user_content},
             ],
             "tools": self.tools,
             "tool_choice": "required",
             "parallel_tool_calls": False,
-            "max_completion_tokens": 2_048 if self.starter else 4_096,
+            "max_completion_tokens": self.max_tokens,
             "extra_body": {
                 "usage": {"include": True},
-                "provider": {"sort": "latency" if self.starter else "throughput"},
-                **({"reasoning": {"effort": "low"}} if not self.starter else {}),
+                "provider": {"sort": self.sort},
+                **({"reasoning": {"effort": self.effort}} if self.effort else {}),
             },
         }
         try:
@@ -115,11 +121,9 @@ class OpenRouterActionProvider:
                 raise ModelActionError("model returned an unexpected function tool call")
             actions.append(
                 _parse_starter_action(tool_call.function.arguments)
-                if self.starter else _parse_action(tool_call.function.arguments)
+                if self.role == "starter" else _parse_action(tool_call.function.arguments)
             )
         # Extra calls (repeats, or a premature finish after code) wait for the first one's result.
-        if self.starter and not isinstance(actions[0], ExecuteBrowserCode):
-            raise ModelActionError("starter must execute browser code")
         return actions[0]
 
     async def close(self) -> None:

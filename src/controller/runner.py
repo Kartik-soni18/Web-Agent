@@ -10,7 +10,7 @@ from ..metrics import RunMetrics, RunTrace
 from ..models.actions import AskUser, ExecuteBrowserCode, Finish, Memory
 from ..models.execution import ExecutionResult
 from ..models.observations import BrowserObservation
-from ..models.state import AgentState
+from ..models.state import AgentState, Limits
 from ..llm_adapter import ModelActionError
 from ..worker.client import WorkerClient
 from .api import ACTION_NAMES, Action, ActionProvider, AskUserCallback
@@ -18,11 +18,6 @@ from .context import build_model_context
 
 
 Response = TypeVar("Response")
-# ponytail: fixed budgets can cut off valid long tasks; expose per-task limits if measured tasks need them.
-MAX_STEPS = 16
-MAX_RUN_SECONDS = 300
-MODEL_CALL_SECONDS = 90
-WORKER_CALL_SECONDS = 45
 
 
 def _response_dataclass(
@@ -59,10 +54,13 @@ class Controller:
         self,
         action_providers: dict[str, ActionProvider],
         *,
+        limits: Limits = Limits(),
         ask_user: AskUserCallback = prompt_user,
         worker_factory: Callable[[], WorkerClient] = WorkerClient,
     ) -> None:
+        # Tiers in escalation order: the first one starts, failures move down the list.
         self.action_providers = action_providers
+        self.limits = limits
         self.ask_user = ask_user
         self.worker_factory = worker_factory
         self.state: AgentState | None = None
@@ -72,7 +70,9 @@ class Controller:
         if not task.strip():
             raise ValueError("task must not be empty")
 
-        state = AgentState(task=task, remaining_requirements=[task])
+        state = AgentState(
+            task=task, agent=next(iter(self.action_providers)), remaining_requirements=[task]
+        )
         self.state = state
         worker = self.worker_factory()
         metrics = RunMetrics(
@@ -84,13 +84,15 @@ class Controller:
         )
         self.metrics = metrics
         run_started = perf_counter()
-        deadline = run_started + MAX_RUN_SECONDS
+        deadline = run_started + self.limits.max_run_seconds
         final_answer = None
         final_success = False
         run_error: BaseException | None = None
 
         try:
-            started = await asyncio.wait_for(worker.start(), timeout=WORKER_CALL_SECONDS)
+            started = await asyncio.wait_for(
+                worker.start(), timeout=self.limits.worker_call_seconds
+            )
             observation = _response_dataclass(
                 started, "observation", BrowserObservation
             )
@@ -104,7 +106,7 @@ class Controller:
             raise
         finally:
             try:
-                await asyncio.wait_for(worker.close(), timeout=10)
+                await asyncio.wait_for(worker.close(), timeout=self.limits.cleanup_seconds)
             except BaseException as error:
                 if isinstance(error, TimeoutError):
                     await worker.abort()
@@ -130,12 +132,16 @@ class Controller:
         self, state: AgentState, worker: WorkerClient, metrics: RunMetrics,
         deadline: float,
     ) -> Finish:
+        limits = self.limits
+        tiers = list(self.action_providers)
+
         async def step(state: AgentState) -> dict[str, object]:
             self.state = state
-            if state.step >= MAX_STEPS or perf_counter() >= deadline:
+            tier = self.action_providers[state.agent]
+            if state.step >= limits.max_steps or perf_counter() >= deadline:
                 reason = (
-                    f"{MAX_STEPS} steps" if state.step >= MAX_STEPS
-                    else f"{MAX_RUN_SECONDS} seconds"
+                    f"{limits.max_steps} steps" if state.step >= limits.max_steps
+                    else f"{limits.max_run_seconds} seconds"
                 )
                 state.result = Finish(
                     answer=f"Stopped after {reason} without completing the task.",
@@ -145,8 +151,8 @@ class Controller:
             state.step += 1
             trace = RunTrace(step=state.step, agent=state.agent)
             state.screenshot = (
-                await asyncio.wait_for(worker.screenshot(), timeout=WORKER_CALL_SECONDS)
-                if state.agent == "big" else None
+                await asyncio.wait_for(worker.screenshot(), timeout=limits.worker_call_seconds)
+                if tier.screenshots else None
             )
             action = await self._next_action(state, trace, metrics, deadline)
 
@@ -154,8 +160,8 @@ class Controller:
                 await self._execute_browser_code(action, state, worker, trace, metrics, deadline)
                 # Code that ran but left the page unchanged twice in a row is a silent no-op,
                 # not progress: keep its claimed facts out of memory and escalate.
-                made_progress = trace.success and state.unchanged_observations < 2
-                if made_progress and state.agent != "starter":
+                made_progress = trace.success and state.unchanged_observations < limits.stall_after
+                if made_progress and tier.role != "starter":
                     _apply_memory(action.memory, state)
             elif isinstance(action, AskUser):
                 await self._ask_for_clarification(action, state)
@@ -173,25 +179,34 @@ class Controller:
                 metrics.add_trace(trace)
                 raise TypeError(f"unsupported controller action: {type(action).__name__}")
 
-            # Canvas-like surfaces need eyes; big is the vision model.
-            # ponytail: big is sticky; drop back to mid after clean steps if screenshot cost matters.
+            # Escalation: a starter always hands off; a worker escalates when its code fails or
+            # stalls, or a canvas-like surface needs eyes it lacks. The next tier down the list
+            # takes over (the first one with screenshots if vision is needed); none left = stay.
+            # ponytail: escalation is sticky; drop back after clean steps if screenshot cost matters.
             needs_vision = bool(
                 state.observation and state.observation.page_geometry.get("surfaces")
-            )
-            if state.agent == "starter":
-                state.agent = "big" if needs_vision else "mid"
+            ) and not tier.screenshots
+            if tier.role == "starter" or (
+                isinstance(action, ExecuteBrowserCode) and (not made_progress or needs_vision)
+            ):
+                state.agent = next(
+                    (
+                        name for name in tiers[tiers.index(state.agent) + 1:]
+                        if self.action_providers[name].screenshots or not needs_vision
+                    ),
+                    state.agent,
+                )
+            if tier.role == "starter":
                 state.result = None
-            elif isinstance(action, ExecuteBrowserCode) and (not made_progress or needs_vision):
-                state.agent = "big"
             return vars(state)
 
         graph = StateGraph(AgentState)
-        for agent in ("starter", "mid", "big"):
+        for agent in tiers:
             graph.add_node(agent, step)
             graph.add_conditional_edges(
                 agent,
                 lambda state: END if state.result is not None else state.agent,
-                ["mid", "big", END],
+                [*tiers, END],
             )
         graph.add_edge(START, state.agent)
         result = await graph.compile().ainvoke(vars(state))
@@ -204,10 +219,13 @@ class Controller:
     ) -> Action:
         started = perf_counter()
         provider = self.action_providers[state.agent]
-        context = build_model_context(state)
+        context = (
+            {"original_task": state.task} if provider.role == "starter"
+            else build_model_context(state, self.limits)
+        )
         try:
             for attempt in range(2):
-                timeout = min(MODEL_CALL_SECONDS, max(0, deadline - perf_counter()))
+                timeout = min(self.limits.model_call_seconds, max(0, deadline - perf_counter()))
                 trace.model_attempts += 1
                 try:
                     action = await asyncio.wait_for(
@@ -249,7 +267,7 @@ class Controller:
         deadline: float,
     ) -> None:
         started = perf_counter()
-        timeout = min(WORKER_CALL_SECONDS, max(0, deadline - perf_counter()))
+        timeout = min(self.limits.worker_call_seconds, max(0, deadline - perf_counter()))
         try:
             response = await asyncio.wait_for(
                 worker.execute(action.code), timeout=timeout,
@@ -287,13 +305,13 @@ class Controller:
         # Keep what each recent attempt ran and returned, so a repeated dead end is visible.
         outcome = execution.traceback or execution.result or execution.stdout or ""
         state.recent_actions = [
-            *state.recent_actions[-4:],
+            *state.recent_actions,
             f"{action.intent}: code {'ran' if execution.success else 'failed'}; "
             f"now at {observation.url}"
             + ("; page unchanged" if state.unchanged_observations else "")
             + f"\n  code: {' '.join(action.code.split())[:200]}"
             + f"\n  returned: {' '.join(outcome.split())[:200]}",
-        ]
+        ][-self.limits.recent_actions:]
 
         trace.success = execution.success
         trace.execution_result = asdict(execution)
