@@ -39,6 +39,7 @@ def _parse_action(raw_arguments: str) -> ExecuteBrowserCode | AskUser | Finish:
         raise ModelActionError("act returned invalid JSON arguments") from error
     if not isinstance(arguments, dict):
         raise ModelActionError("act arguments must be a JSON object")
+    arguments = {key: value for key, value in arguments.items() if value is not None}
 
     expected = {
         "execute_browser_code": {

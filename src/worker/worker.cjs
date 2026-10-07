@@ -256,9 +256,9 @@ exports.serve = async function () {
   const state = {};
 
   async function close() {
-    // Close only the agent's tab, then disconnect; the attached Chrome keeps running.
+    // Close the agent's own context (all its tabs and storage), then disconnect; Chrome keeps running.
     closing ??= (async () => {
-      await page?.close().catch(() => {});
+      await context?.close().catch(() => {});
       await browser?.close();
     })();
     await closing;
@@ -321,7 +321,13 @@ exports.serve = async function () {
       execution.result = value === undefined ? null : inspect(value, { colors: false });
     } catch (error) {
       execution.success = false;
-      execution.traceback = error?.stack ?? String(error);
+      const stack = String(error?.stack ?? error);
+      // AsyncFunction adds two header lines, so stack line N is snippet line N - 2.
+      const frame = /<anonymous>:(\d+):\d+/.exec(stack);
+      const line = frame && code.split('\n')[frame[1] - 3]?.trim();
+      execution.traceback = (line ? `Failed at snippet line ${frame[1] - 2}: ${line}\n` : '')
+        + (frame?.[1] > 3 ? 'Earlier lines already ran; continue from here, do not redo them.\n' : '')
+        + stack.split('\n').filter(text => !/<anonymous>|node:internal/.test(text) && !text.includes(__filename)).join('\n');
     }
     return execution;
   }
@@ -334,7 +340,9 @@ exports.serve = async function () {
       if (browser) throw new Error('worker is already started');
       try {
         browser = await playwright.chromium.connectOverCDP(message.cdp_url);
-        context = browser.contexts()[0];
+        // A fresh context per task, so cookies, storage and tabs never leak between tasks.
+        // ponytail: also drops the profile's logins; reuse contexts()[0] if tasks need them.
+        context = await browser.newContext({ viewport: null });
         page = await context.newPage();
         screenshotTimeout = message.screenshot_timeout_ms;
         page.setDefaultTimeout(message.action_timeout_ms);

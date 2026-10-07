@@ -169,10 +169,14 @@ class WorkerClient:
             if process.stdin is not None:
                 process.stdin.close()
             if terminate and process.returncode is None:
+                # SIGTERM first so the worker closes its context; SIGKILL only if it hangs.
                 try:
-                    process.kill()
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), self.limits.cleanup_seconds)
                 except ProcessLookupError:
                     pass
+                except TimeoutError:
+                    process.kill()
             await process.wait()
 
         if stderr_task is not None:

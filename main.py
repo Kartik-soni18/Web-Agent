@@ -16,10 +16,10 @@ from src.worker.client import DEFAULT_CDP_URL, WorkerClient
 TIERS = {
     "starter": dict(model="openai/gpt-oss-20b", role="starter", screenshots=False,
                     max_tokens=2_048, effort=None, sort="latency"),
-    "big": dict(model="z-ai/glm-5.3-flash", role="worker", screenshots=True,
-                max_tokens=4_096, effort="low", sort="throughput"),
+    "big": dict(model="deepseek/deepseek-v4.1-flash", role="worker", screenshots=True,
+                max_tokens=16_384, effort="low", sort="latency"),
 }
-LIMITS = Limits()
+LIMITS = Limits(max_run_seconds=600)
 
 
 def _parser() -> argparse.ArgumentParser:

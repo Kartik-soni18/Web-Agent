@@ -40,6 +40,17 @@ class OpenRouterActionProvider:
             }
             parameters["properties"]["action"]["enum"] = ["execute_browser_code"]
             parameters["required"] = ["action", "url", "intent"]
+        elif model.startswith("openai/"):
+            # OpenAI models fill every property, so unused ones must be null rather than blank.
+            properties = self.tools[0]["function"]["parameters"]["properties"]
+            for key, used_by in {
+                "code": "execute_browser_code", "question": "ask_user", "answer": "finish",
+                "success": "finish", "intent": "execute_browser_code or ask_user",
+            }.items():
+                properties[key]["type"] = [properties[key]["type"], "null"]
+                properties[key]["description"] = (
+                    f"{properties[key].get('description', '')} Null unless action is {used_by}."
+                ).strip()
         self.client = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
         self.last_usage: dict[str, int | float | str] = {}
         self.last_request: dict[str, object] | None = None
